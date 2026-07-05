@@ -46,8 +46,11 @@ runs/smoke-test/
   metrics.jsonl
   metrics.csv
 
-checkpoints/smoke-test.pt
+checkpoints/smoke-test.pt        # inference weights
+checkpoints/training-state.pt    # resumable model/optimizer/replay state
 ```
+
+Pass `--training-state` to give the training state a run-specific path.
 
 ## 3. Start a longer 10x10 run
 
@@ -72,12 +75,28 @@ python -m gomoku_muzero.train \
   --evaluation-games 50 \
   --run-name baseline-10x10 \
   --checkpoint checkpoints/baseline-10x10.pt \
+  --training-state checkpoints/baseline-10x10-state.pt \
   --tensorboard \
   --seed 0
 ```
 
 Run names cannot overwrite existing run directories. Choose a new name when
 repeating an experiment, such as `baseline-10x10-seed1`.
+
+If the run is interrupted, continue it from the last completed iteration:
+
+```bash
+python -m gomoku_muzero.train \
+  --resume checkpoints/baseline-10x10-state.pt \
+  --iterations 100 \
+  --run-name baseline-10x10-resumed \
+  --checkpoint checkpoints/baseline-10x10.pt \
+  --training-state checkpoints/baseline-10x10-state.pt
+```
+
+`--iterations` counts additional iterations; the saved board size and win
+length take precedence over command-line values. See
+[training.md](training.md) for details.
 
 ## 4. Monitor training
 
@@ -98,6 +117,7 @@ http://localhost:6006
 Useful signals include:
 
 - policy KL, value loss, and reward loss;
+- value calibration error (`value_calibration_mae`) and gradient norm;
 - games and optimizer steps per second;
 - replay sample age;
 - actor queue size and policy lag;
@@ -145,11 +165,13 @@ Play as white by replacing `black` with `white`. Enter moves as zero-based
 ```bash
 du -sh runs/baseline-10x10
 du -sh checkpoints/baseline-10x10.pt
+du -sh checkpoints/baseline-10x10-state.pt
 ```
 
-Replay games exist only in memory and disappear when training exits. Persisted
-storage consists of configuration, metrics, optional TensorBoard events,
-plots, and the latest checkpoint.
+Persisted storage consists of configuration, metrics, optional TensorBoard
+events, plots, the latest inference checkpoint, and the training state. The
+training state includes the replay buffer, so it is the largest artifact;
+delete it once a run is finished and will not be resumed.
 
 ## 8. Clean up
 
@@ -166,17 +188,18 @@ Remove only the selected run data:
 rm -rf runs/baseline-10x10
 ```
 
-Remove its trained checkpoint separately:
+Remove its trained checkpoint and training state separately:
 
 ```bash
 rm -f checkpoints/baseline-10x10.pt
+rm -f checkpoints/baseline-10x10-state.pt
 ```
 
 For the quick validation artifacts:
 
 ```bash
 rm -rf runs/smoke-test
-rm -f checkpoints/smoke-test.pt
+rm -f checkpoints/smoke-test.pt checkpoints/training-state.pt
 ```
 
 Do not remove a checkpoint you still want to play or compare. Both `runs/`

@@ -29,6 +29,7 @@ python -m pytest tests/test_trainer.py
 python -m pytest tests/test_self_play.py
 python -m pytest tests/test_pipeline.py
 python -m pytest tests/test_play.py
+python -m pytest tests/test_checkpoint.py
 python -m pytest tests/test_device.py
 python -m pytest tests/test_async_self_play.py
 python -m pytest tests/test_metrics.py
