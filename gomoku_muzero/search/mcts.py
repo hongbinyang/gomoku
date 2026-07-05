@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import sqrt
+from math import log, sqrt
 from collections.abc import Callable
 from typing import Sequence
 
@@ -19,10 +19,33 @@ class MCTSConfig:
     """The small set of search hyperparameters used in this implementation."""
 
     num_simulations: int = 50
-    pb_c: float = 1.5
+    pb_c_init: float = 1.25
+    pb_c_base: float = 19652.0
     discount: float = 1.0
     dirichlet_alpha: float = 0.3
     root_exploration_fraction: float = 0.25
+
+
+class MinMaxStats:
+    """Track the observed Q-value range so PUCT can normalize to [0, 1].
+
+    MuZero normalizes Q values with the minimum and maximum seen inside the
+    current search tree, keeping the exploitation term on a stable scale
+    relative to the prior-driven exploration term.
+    """
+
+    def __init__(self) -> None:
+        self.minimum = float("inf")
+        self.maximum = float("-inf")
+
+    def update(self, value: float) -> None:
+        self.minimum = min(self.minimum, value)
+        self.maximum = max(self.maximum, value)
+
+    def normalize(self, value: float) -> float:
+        if self.maximum > self.minimum:
+            return (value - self.minimum) / (self.maximum - self.minimum)
+        return value
 
 
 @dataclass
@@ -32,16 +55,18 @@ class Node:
     ``prior`` is the probability assigned by the parent policy. ``reward`` is
     the predicted reward for the parent player after entering this node.
     ``value_sum`` stores values from this node's player-to-move perspective.
+    ``predicted_value`` caches the network value produced when the node was
+    expanded so revisits never repeat inference.
     """
 
     prior: float
     to_play: int
     reward: float = 0.0
     hidden_state: Tensor | None = None
+    predicted_value: float = 0.0
     visit_count: int = 0
     value_sum: float = 0.0
     children: dict[int, Node] = field(default_factory=dict)
-    expanded: bool = False
 
     @property
     def value(self) -> float:
@@ -64,8 +89,10 @@ class MCTS:
         self.config = config or MCTSConfig()
         if self.config.num_simulations < 1:
             raise ValueError("num_simulations must be positive")
-        if self.config.pb_c < 0:
-            raise ValueError("pb_c must be non-negative")
+        if self.config.pb_c_init < 0:
+            raise ValueError("pb_c_init must be non-negative")
+        if self.config.pb_c_base <= 0:
+            raise ValueError("pb_c_base must be positive")
         if not 0 <= self.config.discount <= 1:
             raise ValueError("discount must be in [0, 1]")
         self.rng = np.random.default_rng(seed)
@@ -87,6 +114,7 @@ class MCTS:
         if to_play not in (-1, 1):
             raise ValueError("to_play must be -1 or +1")
 
+        self.network.eval()
         observation_tensor = self._observation_tensor(observation)
         with torch.inference_mode():
             initial = self.network.initial_inference(observation_tensor)
@@ -95,11 +123,13 @@ class MCTS:
             prior=1.0,
             to_play=to_play,
             hidden_state=initial.hidden_state.detach(),
+            predicted_value=float(initial.value.item()),
         )
         self._expand(root, legal_actions, initial.policy_logits[0])
         if add_exploration_noise:
             self.add_exploration_noise(root)
 
+        min_max_stats = MinMaxStats()
         report_every = max(
             1, (self.config.num_simulations + 19) // 20
         )
@@ -109,14 +139,19 @@ class MCTS:
             action_path: list[int] = []
 
             while node.children:
-                action, node = self.select_child(search_path[-1])
+                action, node = self.select_child(
+                    search_path[-1], min_max_stats
+                )
                 action_path.append(action)
                 search_path.append(node)
                 if node.hidden_state is None:
                     break
 
-            if len(search_path) == 1:
-                leaf_value = root.value
+            if node.hidden_state is not None:
+                # Root without children, or a revisited leaf whose expansion
+                # produced no children: reuse the cached network value
+                # instead of repeating inference.
+                leaf_value = node.predicted_value
             else:
                 parent = search_path[-2]
                 action = action_path[-1]
@@ -132,6 +167,7 @@ class MCTS:
 
                 node.hidden_state = recurrent.hidden_state.detach()
                 node.reward = float(recurrent.reward.item())
+                node.predicted_value = float(recurrent.value.item())
                 remaining_actions = [
                     candidate
                     for candidate in parent.children
@@ -140,9 +176,9 @@ class MCTS:
                 self._expand(
                     node, remaining_actions, recurrent.policy_logits[0]
                 )
-                leaf_value = float(recurrent.value.item())
+                leaf_value = node.predicted_value
 
-            self.backup(search_path, leaf_value)
+            self.backup(search_path, leaf_value, min_max_stats)
             if progress_callback is not None and (
                 simulation % report_every == 0
                 or simulation == self.config.num_simulations
@@ -153,18 +189,41 @@ class MCTS:
 
         return root
 
-    def select_child(self, parent: Node) -> tuple[int, Node]:
-        """Choose the child with maximal Q + PUCT exploration bonus."""
+    def select_child(
+        self,
+        parent: Node,
+        min_max_stats: MinMaxStats | None = None,
+    ) -> tuple[int, Node]:
+        """Choose the child with maximal normalized Q + PUCT exploration.
+
+        Follows the paper's PUCT formula: ``pb_c`` grows logarithmically
+        with the parent visit count, and visited children's Q values are
+        normalized to [0, 1] using the range observed during this search.
+        Unvisited children score zero on the exploitation term.
+        """
         if not parent.children:
             raise ValueError("cannot select from a node without children")
+        stats = min_max_stats or MinMaxStats()
+        pb_c = (
+            log(
+                (parent.visit_count + self.config.pb_c_base + 1)
+                / self.config.pb_c_base
+            )
+            + self.config.pb_c_init
+        )
 
         def score(item: tuple[int, Node]) -> tuple[float, int]:
             action, child = item
-            q_value = child.reward - self.config.discount * child.value
+            if child.visit_count > 0:
+                q_value = stats.normalize(
+                    child.reward - self.config.discount * child.value
+                )
+            else:
+                q_value = 0.0
             exploration = (
-                self.config.pb_c
+                pb_c
                 * child.prior
-                * sqrt(parent.visit_count + 1)
+                * sqrt(parent.visit_count)
                 / (child.visit_count + 1)
             )
             # Prefer the lower action index when scores are exactly equal.
@@ -172,12 +231,22 @@ class MCTS:
 
         return max(parent.children.items(), key=score)
 
-    def backup(self, search_path: Sequence[Node], leaf_value: float) -> None:
+    def backup(
+        self,
+        search_path: Sequence[Node],
+        leaf_value: float,
+        min_max_stats: MinMaxStats | None = None,
+    ) -> None:
         """Back up a leaf value through an alternating-player path."""
         value = leaf_value
-        for node in reversed(search_path):
+        for index, node in enumerate(reversed(search_path)):
             node.value_sum += value
             node.visit_count += 1
+            if min_max_stats is not None and index < len(search_path) - 1:
+                # Record the Q value this node now presents to its parent.
+                min_max_stats.update(
+                    node.reward - self.config.discount * node.value
+                )
             value = node.reward - self.config.discount * value
 
     def policy_target(self, root: Node) -> np.ndarray:
@@ -242,7 +311,6 @@ class MCTS:
     def _expand(
         self, node: Node, legal_actions: Sequence[int], policy_logits: Tensor
     ) -> None:
-        node.expanded = True
         if not legal_actions:
             return
         action_tensor = torch.tensor(

@@ -38,6 +38,7 @@ def play_self_play_game(
     actions: list[int] = []
     rewards: list[float] = []
     policies: list[np.ndarray] = []
+    root_values: list[float] = []
     to_play = [env.current_player]
 
     while not env.terminated:
@@ -56,6 +57,7 @@ def play_self_play_game(
             ),
         )
         policies.append(mcts.policy_target(root))
+        root_values.append(root.value)
         temperature = (
             config.temperature
             if len(actions) < config.temperature_moves
@@ -67,13 +69,14 @@ def play_self_play_game(
         actions.append(action)
         rewards.append(reward)
         observations.append(observation)
-        # A latent transition always changes perspective, including the final
-        # move. The environment itself keeps current_player at the winner.
-        to_play.append(-int(info["acting_player"]))
+        # The environment flips current_player after every move, including
+        # terminal ones, so this matches the observation's to-play plane.
+        to_play.append(env.current_player)
 
     policies.append(
         np.zeros(env.action_space_size, dtype=np.float32)
     )
+    root_values.append(0.0)
     outcome_for_black = env.winner
     values = [
         float(outcome_for_black * player)
@@ -88,6 +91,7 @@ def play_self_play_game(
         policies=policies,
         values=values,
         to_play=to_play,
+        root_values=root_values,
     )
     game.validate(env.action_space_size)
     return game

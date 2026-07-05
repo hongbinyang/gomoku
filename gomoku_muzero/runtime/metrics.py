@@ -31,6 +31,7 @@ class RunLogger:
         self.jsonl_path = self.run_dir / "metrics.jsonl"
         self.csv_path = self.run_dir / "metrics.csv"
         self._rows: list[dict[str, Any]] = []
+        self._csv_fields: list[str] | None = None
         self._tensorboard = None
 
         if tensorboard:
@@ -69,7 +70,7 @@ class RunLogger:
         with self.jsonl_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(row, sort_keys=True) + "\n")
         self._rows.append(row)
-        self._rewrite_csv()
+        self._update_csv(row)
 
         if self._tensorboard is not None:
             for name, value in metrics.items():
@@ -85,6 +86,21 @@ class RunLogger:
         if self._tensorboard is not None:
             self._tensorboard.close()
 
+    def _update_csv(self, row: dict[str, Any]) -> None:
+        """Append to the CSV, rewriting only when new columns appear."""
+        if self._csv_fields is not None and all(
+            key in self._csv_fields for key in row
+        ):
+            with self.csv_path.open(
+                "a", newline="", encoding="utf-8"
+            ) as stream:
+                writer = csv.DictWriter(
+                    stream, fieldnames=self._csv_fields, restval=""
+                )
+                writer.writerow(row)
+            return
+        self._rewrite_csv()
+
     def _rewrite_csv(self) -> None:
         preferred = ["timestamp", "event", "step"]
         extra = sorted(
@@ -95,10 +111,12 @@ class RunLogger:
                 if key not in preferred
             }
         )
-        fields = preferred + extra
+        self._csv_fields = preferred + extra
         temporary = self.csv_path.with_suffix(".csv.tmp")
         with temporary.open("w", newline="", encoding="utf-8") as stream:
-            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer = csv.DictWriter(
+                stream, fieldnames=self._csv_fields, restval=""
+            )
             writer.writeheader()
             writer.writerows(self._rows)
         temporary.replace(self.csv_path)

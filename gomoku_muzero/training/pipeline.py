@@ -10,7 +10,7 @@ from time import perf_counter
 from gomoku_muzero.game.env import GomokuEnv
 from gomoku_muzero.workflows.evaluate import EvaluationResult, evaluate_against_random
 from gomoku_muzero.search.mcts import MCTS
-from gomoku_muzero.training.replay import ReplayBuffer
+from gomoku_muzero.training.replay import GameHistory, ReplayBuffer
 from gomoku_muzero.workflows.self_play import SelfPlayConfig, play_self_play_game
 from gomoku_muzero.training.trainer import MuZeroTrainer
 
@@ -52,6 +52,7 @@ class MuZeroPipeline:
         self.trainer = trainer
         self.config = learning_config or LearningConfig()
         self.self_play_config = self_play_config or SelfPlayConfig()
+        self._calibration_errors: list[float] = []
         if self.config.games_per_iteration < 1:
             raise ValueError("games_per_iteration must be positive")
         if self.config.training_steps_per_iteration < 0:
@@ -68,6 +69,7 @@ class MuZeroPipeline:
     ) -> IterationResult:
         """Generate games, train, and optionally evaluate once."""
         report = progress_callback or (lambda _: None)
+        self._calibration_errors = []
         iteration_started = perf_counter()
         phase_started = perf_counter()
         games_generated, moves_generated = self._generate_games(
@@ -129,11 +131,27 @@ class MuZeroPipeline:
                 ),
             )
             self.replay_buffer.save_game(game)
+            self._note_game(game)
             moves_generated += game.num_moves
         return self.config.games_per_iteration, moves_generated
 
+    def _note_game(self, game: GameHistory) -> None:
+        """Track how well search root values predicted final outcomes."""
+        if game.root_values is None or game.num_moves == 0:
+            return
+        error = fmean(
+            abs(game.root_values[index] - game.values[index])
+            for index in range(game.num_moves)
+        )
+        self._calibration_errors.append(error)
+
     def _extra_operational_metrics(self) -> dict[str, float]:
-        return self.replay_buffer.sampling_metrics()
+        metrics = self.replay_buffer.sampling_metrics()
+        if self._calibration_errors:
+            metrics["value_calibration_mae"] = fmean(
+                self._calibration_errors
+            )
+        return metrics
 
     def _train(
         self,

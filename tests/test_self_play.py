@@ -27,5 +27,9 @@ def test_self_play_produces_valid_complete_game() -> None:
     assert np.all(game.policies[-1] == 0)
     assert game.values[-1] == 0
     assert game.rewards[-1] in (0.0, 1.0)
+    assert game.root_values is not None
+    assert len(game.root_values) == game.num_moves + 1
+    assert game.root_values[-1] == 0.0
+    assert game.to_play[-1] == env.current_player
     for index in range(game.num_moves):
         assert game.values[index] == env.winner * game.to_play[index]

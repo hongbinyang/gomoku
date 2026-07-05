@@ -36,7 +36,12 @@ python -m gomoku_muzero.train \
   --simulations 25
 ```
 
-Training saves `checkpoints/latest.pt`. Play against it:
+Training saves `checkpoints/latest.pt` (inference weights) and
+`checkpoints/training-state.pt` (model, optimizer, and replay buffer).
+Resume an interrupted run with
+`python -m gomoku_muzero.train --resume checkpoints/training-state.pt`.
+
+Play against a trained checkpoint:
 
 ```bash
 python -m gomoku_muzero.play \
@@ -67,6 +72,12 @@ Enter moves as zero-based coordinates such as `2 3`. Enter `q` to stop.
 current network -> MCTS self-play -> replay buffer -> K-step training
                 -> periodic evaluation -> saved checkpoint -> human play
 ```
+
+Search follows the paper's PUCT formulation (min-max Q normalization and
+the logarithmic exploration schedule). Training applies the paper's unroll
+stabilizers (hidden-state gradient halving, 1/K step weighting), supervises
+absorbing states beyond terminal positions, and augments replay samples
+with the board's eight dihedral symmetries by default.
 
 The implementation favors a clear core MuZero design and can be scaled by
 increasing board size, self-play data, network capacity, training work, and

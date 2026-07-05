@@ -39,6 +39,7 @@ def test_one_end_to_end_learning_iteration() -> None:
     assert result.latest_metrics is not None
     assert result.operational_metrics["iteration_seconds"] >= 0
     assert result.operational_metrics["moves_generated"] >= 1
+    assert "value_calibration_mae" in result.operational_metrics
     assert result.evaluation is not None
     assert (
         result.evaluation.wins

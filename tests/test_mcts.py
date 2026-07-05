@@ -43,7 +43,7 @@ class FakeNetwork(nn.Module):
 def make_search(num_simulations: int = 8) -> MCTS:
     return MCTS(
         FakeNetwork(),  # type: ignore[arg-type]
-        MCTSConfig(num_simulations=num_simulations, pb_c=1.5),
+        MCTSConfig(num_simulations=num_simulations),
         seed=7,
     )
 
@@ -112,6 +112,36 @@ def test_zero_temperature_selects_most_visited_action() -> None:
     )
 
     assert make_search().select_action(root, temperature=0) == 3
+
+
+def test_childless_leaves_are_not_reexpanded() -> None:
+    """A latent leaf with no legal continuations is inferred exactly once."""
+
+    class CountingNetwork(FakeNetwork):
+        def __init__(self) -> None:
+            super().__init__()
+            self.recurrent_calls = 0
+
+        def recurrent_inference(self, hidden_state, action):
+            self.recurrent_calls += 1
+            return super().recurrent_inference(hidden_state, action)
+
+    network = CountingNetwork()
+    search = MCTS(
+        network,  # type: ignore[arg-type]
+        MCTSConfig(num_simulations=6),
+        seed=7,
+    )
+
+    # A single legal action: after one expansion the only child has no
+    # remaining actions, so later simulations revisit a childless leaf.
+    search.run(
+        np.zeros((3, 2, 2), dtype=np.float32),
+        legal_actions=[2],
+        to_play=1,
+    )
+
+    assert network.recurrent_calls == 1
 
 
 def test_search_reports_simulation_progress() -> None:

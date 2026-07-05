@@ -24,12 +24,20 @@ class LossWeights:
 
 @dataclass(frozen=True)
 class MuZeroLosses:
-    """Scalar differentiable losses from one replay batch."""
+    """Scalar differentiable losses from one replay batch.
+
+    ``policy``, ``value``, and ``reward`` are the optimized quantities with
+    the paper's per-unroll-step 1/K weighting. ``policy_ce``,
+    ``policy_target_entropy``, and ``policy_kl`` are unweighted diagnostics
+    averaged over real (searched) positions only, satisfying
+    ``policy_ce = policy_target_entropy + policy_kl``.
+    """
 
     total: Tensor
     policy: Tensor
     value: Tensor
     reward: Tensor
+    policy_ce: Tensor
     policy_target_entropy: Tensor
     policy_kl: Tensor
 
@@ -57,11 +65,18 @@ class MuZeroTrainer:
         )
 
     def compute_loss(self, batch: ReplayBatch) -> MuZeroLosses:
-        """Unroll K model steps and compute masked MuZero losses.
+        """Unroll K model steps and compute the MuZero training loss.
 
         Prediction index 0 comes from ``h(observation)`` followed by ``f``.
         Prediction indices 1 through K come from repeated ``g`` then ``f``.
         Reward index k supervises the transition from position k to k+1.
+
+        Two stabilizers from the paper are applied: the hidden state's
+        gradient is halved at every dynamics application, and each unrolled
+        step's loss is scaled by 1/K (the initial prediction keeps weight 1).
+        Value and reward are supervised at every step, including absorbing
+        padding beyond terminal states where the targets are zero. The
+        policy loss vanishes naturally on positions with all-zero targets.
         """
         device = next(self.network.parameters()).device
         observations = torch.as_tensor(
@@ -95,17 +110,23 @@ class MuZeroTrainer:
             prediction_mask,
         )
 
+        num_unroll_steps = actions.shape[1]
         initial = self.network.initial_inference(observations)
         hidden_state = initial.hidden_state
         policy_logits = [initial.policy_logits]
         predicted_values = [initial.value.squeeze(-1)]
         predicted_rewards: list[Tensor] = []
 
-        for step in range(actions.shape[1]):
+        for step in range(num_unroll_steps):
             recurrent = self.network.recurrent_inference(
                 hidden_state, actions[:, step]
             )
-            hidden_state = recurrent.hidden_state
+            # Halve the gradient flowing back through the dynamics chain
+            # (Appendix G of the MuZero paper) to stabilize deep unrolls.
+            hidden_state = (
+                0.5 * recurrent.hidden_state
+                + 0.5 * recurrent.hidden_state.detach()
+            )
             predicted_rewards.append(recurrent.reward.squeeze(-1))
             policy_logits.append(recurrent.policy_logits)
             predicted_values.append(recurrent.value.squeeze(-1))
@@ -113,32 +134,33 @@ class MuZeroTrainer:
         policy_logits_tensor = torch.stack(policy_logits, dim=1)
         predicted_values_tensor = torch.stack(predicted_values, dim=1)
 
+        # Per-step loss weights: the initial prediction keeps weight one and
+        # every unrolled step is scaled by 1/K, following the paper.
+        unroll_weight = (
+            1.0 / num_unroll_steps if num_unroll_steps > 0 else 1.0
+        )
+        prediction_weights = observations.new_full(
+            (1, num_unroll_steps + 1), unroll_weight
+        )
+        prediction_weights[0, 0] = 1.0
+
         per_position_policy_loss = -(
             target_policies
             * F.log_softmax(policy_logits_tensor, dim=-1)
         ).sum(dim=-1)
-        # Terminal positions have a zero policy because no action is selected.
-        policy_mask = prediction_mask * (
-            target_policies.sum(dim=-1) > 0
-        ).to(torch.float32)
-        policy_loss = self._masked_mean(
-            per_position_policy_loss, policy_mask
+        # Zero policy targets (terminal and absorbing positions) contribute
+        # exactly zero, so no extra mask is needed for the optimized loss.
+        policy_loss = (
+            (per_position_policy_loss * prediction_weights).sum(dim=1).mean()
         )
-        per_position_target_entropy = -(
-            target_policies
-            * target_policies.clamp_min(1e-8).log()
-        ).sum(dim=-1)
-        policy_target_entropy = self._masked_mean(
-            per_position_target_entropy, policy_mask
-        )
-        # CE(target, prediction) = H(target) + KL(target || prediction).
-        policy_kl = (policy_loss - policy_target_entropy).clamp_min(0.0)
 
         per_position_value_loss = F.mse_loss(
             predicted_values_tensor, target_values, reduction="none"
         )
-        value_loss = self._masked_mean(
-            per_position_value_loss, prediction_mask
+        # Absorbing padding beyond terminal states is supervised toward its
+        # zero target so search cannot exploit hallucinated values there.
+        value_loss = (
+            (per_position_value_loss * prediction_weights).sum(dim=1).mean()
         )
 
         if predicted_rewards:
@@ -150,11 +172,26 @@ class MuZeroTrainer:
                 target_rewards,
                 reduction="none",
             )
-            reward_loss = self._masked_mean(
-                per_transition_reward_loss, dynamics_mask
+            reward_loss = (
+                per_transition_reward_loss.sum(dim=1).mean() * unroll_weight
             )
         else:
             reward_loss = observations.new_zeros(())
+
+        # Diagnostics over real searched positions only, unweighted.
+        policy_mask = prediction_mask * (
+            target_policies.sum(dim=-1) > 0
+        ).to(torch.float32)
+        policy_ce = self._masked_mean(per_position_policy_loss, policy_mask)
+        per_position_target_entropy = -(
+            target_policies
+            * target_policies.clamp_min(1e-8).log()
+        ).sum(dim=-1)
+        policy_target_entropy = self._masked_mean(
+            per_position_target_entropy, policy_mask
+        )
+        # CE(target, prediction) = H(target) + KL(target || prediction).
+        policy_kl = (policy_ce - policy_target_entropy).clamp_min(0.0)
 
         total = (
             self.loss_weights.policy * policy_loss
@@ -166,6 +203,7 @@ class MuZeroTrainer:
             policy_loss,
             value_loss,
             reward_loss,
+            policy_ce,
             policy_target_entropy,
             policy_kl,
         )
@@ -176,6 +214,9 @@ class MuZeroTrainer:
         self.optimizer.zero_grad(set_to_none=True)
         losses = self.compute_loss(batch)
         losses.total.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.network.parameters(), max_norm=float("inf")
+        )
         device = next(self.network.parameters()).device
         optimizer_step(self.optimizer, device)
         return {
@@ -183,10 +224,12 @@ class MuZeroTrainer:
             "policy_loss": float(losses.policy.detach()),
             "value_loss": float(losses.value.detach()),
             "reward_loss": float(losses.reward.detach()),
+            "policy_ce": float(losses.policy_ce.detach()),
             "policy_target_entropy": float(
                 losses.policy_target_entropy.detach()
             ),
             "policy_kl": float(losses.policy_kl.detach()),
+            "grad_norm": float(grad_norm),
         }
 
     @staticmethod

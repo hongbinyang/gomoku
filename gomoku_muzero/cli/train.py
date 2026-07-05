@@ -8,7 +8,11 @@ import platform
 import numpy as np
 import torch
 
-from gomoku_muzero.model.checkpoint import save_checkpoint
+from gomoku_muzero.model.checkpoint import (
+    load_training_state,
+    save_checkpoint,
+    save_training_state,
+)
 from gomoku_muzero.game.env import GomokuEnv
 from gomoku_muzero.search.mcts import MCTS, MCTSConfig
 from gomoku_muzero.model.networks import MuZeroNetwork
@@ -88,8 +92,13 @@ def main() -> None:
     parser.add_argument(
         "--replay-sampling",
         choices=("recent", "uniform"),
-        default="recent",
-        help="game sampling distribution (default: recent)",
+        default="uniform",
+        help="game sampling distribution (default: uniform)",
+    )
+    parser.add_argument(
+        "--no-augment",
+        action="store_true",
+        help="disable dihedral symmetry augmentation of replay samples",
     )
     parser.add_argument(
         "--replay-half-life",
@@ -119,6 +128,20 @@ def main() -> None:
         "--checkpoint",
         default="checkpoints/latest.pt",
         help="where to save latest model weights (default: checkpoints/latest.pt)",
+    )
+    parser.add_argument(
+        "--training-state",
+        default="checkpoints/training-state.pt",
+        help=(
+            "where to save resumable training state "
+            "(default: checkpoints/training-state.pt)"
+        ),
+    )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        metavar="PATH",
+        help="resume from a saved training state file",
     )
     parser.add_argument(
         "--device",
@@ -163,14 +186,37 @@ def main() -> None:
             "TPU/XLA currently requires --self-play-mode sync; "
             "process-based TPU actors are not implemented yet"
         )
+
+    resumed_state = None
+    start_iteration = 1
+    if args.resume is not None:
+        resumed_state = load_training_state(
+            args.resume, device.torch_device
+        )
+        start_iteration = resumed_state.iteration + 1
+        if (
+            resumed_state.board_size != args.board_size
+            or resumed_state.win_length != args.win_length
+        ):
+            print(
+                "resume: using saved game configuration "
+                f"{resumed_state.board_size}x{resumed_state.board_size} "
+                f"win={resumed_state.win_length}"
+            )
+        args.board_size = resumed_state.board_size
+        args.win_length = resumed_state.win_length
+
     env = GomokuEnv(
         board_size=args.board_size,
         win_length=args.win_length,
     )
-    network = MuZeroNetwork(
-        board_size=args.board_size,
-        hidden_channels=32,
-    ).to(device.torch_device)
+    if resumed_state is not None:
+        network = resumed_state.network
+    else:
+        network = MuZeroNetwork(
+            board_size=args.board_size,
+            hidden_channels=32,
+        ).to(device.torch_device)
     mcts = MCTS(
         network,
         MCTSConfig(num_simulations=args.simulations),
@@ -182,11 +228,20 @@ def main() -> None:
         seed=args.seed,
         sampling=args.replay_sampling,
         recency_half_life=args.replay_half_life,
+        augment_symmetries=not args.no_augment,
     )
     trainer = MuZeroTrainer(
         network,
         learning_rate=args.learning_rate,
     )
+    if resumed_state is not None:
+        trainer.optimizer.load_state_dict(resumed_state.optimizer_state)
+        for game in resumed_state.games:
+            replay.save_game(game)
+        print(
+            f"resumed from {args.resume}: iteration {resumed_state.iteration}"
+            f", {len(resumed_state.games)} replay games"
+        )
     pipeline_class = (
         AsyncMuZeroPipeline
         if args.self_play_mode == "async"
@@ -243,21 +298,26 @@ def main() -> None:
     if isinstance(pipeline, AsyncMuZeroPipeline):
         pipeline.start()
     try:
-        for iteration in range(1, args.iterations + 1):
+        last_iteration = start_iteration + args.iterations - 1
+        for iteration in range(start_iteration, last_iteration + 1):
             result = pipeline.run_iteration(
                 iteration,
                 progress_callback=show_progress,
             )
             message = (
                 f"iteration={result.iteration} "
-                f"games={result.games_generated} "
-                f"loss={result.latest_metrics['loss']:.3f} "
-                f"policy={result.latest_metrics['policy_loss']:.3f} "
-                f"entropy={result.latest_metrics['policy_target_entropy']:.3f} "
-                f"kl={result.latest_metrics['policy_kl']:.3f} "
-                f"value={result.latest_metrics['value_loss']:.3f} "
-                f"reward={result.latest_metrics['reward_loss']:.3f}"
+                f"games={result.games_generated}"
             )
+            if result.latest_metrics is not None:
+                metrics_line = result.latest_metrics
+                message += (
+                    f" loss={metrics_line['loss']:.3f} "
+                    f"policy={metrics_line['policy_loss']:.3f} "
+                    f"entropy={metrics_line['policy_target_entropy']:.3f} "
+                    f"kl={metrics_line['policy_kl']:.3f} "
+                    f"value={metrics_line['value_loss']:.3f} "
+                    f"reward={metrics_line['reward_loss']:.3f}"
+                )
             if result.evaluation is not None:
                 evaluation = result.evaluation
                 message += (
@@ -280,12 +340,21 @@ def main() -> None:
                 )
             logger.record("iteration", result.iteration, metrics)
             save_checkpoint(network, args.checkpoint, env.win_length)
+            save_training_state(
+                args.training_state,
+                network,
+                trainer.optimizer,
+                iteration,
+                list(replay.games),
+                env.win_length,
+            )
             print(f"\r{message:<{progress_width}}")
     finally:
         if isinstance(pipeline, AsyncMuZeroPipeline):
             pipeline.stop()
         logger.close()
     print(f"checkpoint={args.checkpoint}")
+    print(f"training_state={args.training_state}")
     print(f"run_dir={logger.run_dir}")
 
 

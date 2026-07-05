@@ -32,12 +32,18 @@ python -m pytest tests/test_networks.py
 At the real root, MCTS calls initial inference (`h` then `f`). Each simulation
 uses PUCT, calls recurrent inference (`g` then `f`) for one newly visited
 latent transition, expands legal children, and backs up the leaf value.
+Following the paper, visited children's Q values are normalized to `[0, 1]`
+with the range observed during the search (`MinMaxStats`), and the
+exploration coefficient uses the logarithmic `pb_c_init`/`pb_c_base`
+schedule. Leaves whose expansion produced no children cache their network
+value, so revisits never repeat inference.
 
 A node stores:
 
 - policy prior assigned by its parent;
 - hidden state `[1, C, N, N]`, computed lazily;
 - incoming reward for its parent player;
+- the cached network value from its expansion;
 - mean value from its own player-to-move perspective;
 - action-to-child mapping.
 
@@ -65,15 +71,19 @@ For batch size `B` and unroll length `K`:
 | target_rewards | `[B, K]` | Transition rewards |
 | target_policies | `[B, K+1, N*N]` | MCTS visit distributions |
 | target_values | `[B, K+1]` | Player-to-move outcomes |
-| dynamics_mask | `[B, K]` | Real transitions versus padding |
-| prediction_mask | `[B, K+1]` | Real positions versus padding |
+| dynamics_mask | `[B, K]` | Real transitions versus absorbing padding |
+| prediction_mask | `[B, K+1]` | Real positions versus absorbing padding |
 
-Terminal-adjacent samples are padded and masked.
+Samples that cross the end of a game are padded with absorbing steps: random
+actions with zero value and reward targets, which the trainer supervises so
+the model cannot hallucinate value beyond terminal states (the masks remain
+available to distinguish real data in diagnostics). Each sample is also
+transformed by a random dihedral board symmetry unless augmentation is
+disabled.
 
-The bounded buffer evicts its oldest game. By default it applies exponential
-recency weighting so newly generated policy-improvement data is sampled more
-often without completely discarding older experience. Uniform sampling remains
-available for controlled comparisons.
+The bounded buffer evicts its oldest game and samples uniformly by default;
+exponential recency weighting is available so newly generated
+policy-improvement data is sampled more often.
 
 ```bash
 python -m pytest tests/test_replay.py
@@ -91,9 +101,11 @@ s0 = h(observation)
 ...
 ```
 
-The objectives are policy cross-entropy, value MSE, and reward MSE.
-Backpropagation flows through `h`, every application of `g`, and every
-application of `f`.
+The objectives are policy cross-entropy, value MSE, and reward MSE. Two
+stabilizers from the paper are applied: the hidden state's gradient is
+halved at every application of `g`, and each unrolled step's loss is scaled
+by `1/K` while the initial prediction keeps weight one. Backpropagation
+flows through `h`, every application of `g`, and every application of `f`.
 
 ```bash
 python -m pytest tests/test_trainer.py

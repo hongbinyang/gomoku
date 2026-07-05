@@ -41,9 +41,12 @@ version, and PyTorch version.
 
 Training objectives:
 
-- total, policy, value, and reward losses;
+- total, policy, value, and reward losses (with the paper's per-unroll-step
+  1/K weighting);
+- unweighted policy cross-entropy over searched positions (`policy_ce`);
 - target policy entropy;
-- policy KL divergence.
+- policy KL divergence;
+- global gradient norm before each optimizer step (`grad_norm`).
 
 Throughput and timing:
 
@@ -60,6 +63,13 @@ Actor and replay state:
 - actor queue size and total generated games;
 - actor and published network versions;
 - mean and maximum policy lag.
+
+Search quality:
+
+- `value_calibration_mae`: mean absolute error between MCTS root values and
+  final game outcomes across the iteration's new self-play games. Values
+  drifting toward zero indicate the search is producing trustworthy value
+  estimates; a flat line near one means value learning has not started.
 
 Evaluation and hardware:
 

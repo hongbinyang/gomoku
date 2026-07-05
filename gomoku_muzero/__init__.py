@@ -2,8 +2,11 @@
 
 from gomoku_muzero.model.checkpoint import (
     LoadedCheckpoint,
+    LoadedTrainingState,
     load_checkpoint,
+    load_training_state,
     save_checkpoint,
+    save_training_state,
 )
 from gomoku_muzero.game.env import GomokuEnv
 from gomoku_muzero.workflows.evaluate import EvaluationResult, evaluate_against_random
@@ -20,6 +23,7 @@ __all__ = [
     "GomokuEnv",
     "LearningConfig",
     "LoadedCheckpoint",
+    "LoadedTrainingState",
     "MCTS",
     "MCTSConfig",
     "LossWeights",
@@ -33,6 +37,8 @@ __all__ = [
     "SelfPlayConfig",
     "evaluate_against_random",
     "load_checkpoint",
+    "load_training_state",
     "play_self_play_game",
     "save_checkpoint",
+    "save_training_state",
 ]

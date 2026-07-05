@@ -76,7 +76,9 @@ class GomokuEnv:
 
         The returned reward belongs to the player who took ``action``:
         1.0 for a winning move and 0.0 otherwise. Gomoku has no intermediate
-        rewards. ``current_player`` advances after every non-terminal move.
+        rewards. ``current_player`` advances after every move, including a
+        terminal one, so the observation's to-play plane always describes the
+        player who would move next. Use ``winner`` for the game result.
         """
         if self.terminated:
             raise RuntimeError("cannot step a terminated game")
@@ -101,8 +103,8 @@ class GomokuEnv:
             self.terminated = True
             reward = 0.0
         else:
-            self.current_player = -self.current_player
             reward = 0.0
+        self.current_player = -self.current_player
 
         info = {
             "acting_player": acting_player,

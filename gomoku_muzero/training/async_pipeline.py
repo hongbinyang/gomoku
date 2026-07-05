@@ -60,6 +60,7 @@ class AsyncMuZeroPipeline(MuZeroPipeline):
             )
             game = self.actor.get_game()
             self.replay_buffer.save_game(game)
+            self._note_game(game)
             moves_generated += game.num_moves
             if game.network_version is not None:
                 policy_lags.append(

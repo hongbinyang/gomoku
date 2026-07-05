@@ -24,12 +24,15 @@ With no options it uses a 10x10 board and writes
 | `--unroll-steps N` | `5` | Recurrent dynamics steps per sample |
 | `--learning-rate X` | `0.001` | Adam learning rate |
 | `--replay-capacity N` | `500` | Maximum games retained |
-| `--replay-sampling MODE` | `recent` | Recency-weighted `recent` or baseline `uniform` |
+| `--replay-sampling MODE` | `uniform` | Baseline `uniform` or recency-weighted `recent` |
 | `--replay-half-life N` | `100` | Recency half-life measured in games |
+| `--no-augment` | disabled | Disable dihedral symmetry augmentation |
 | `--evaluation-interval N` | `5` | Iterations between evaluations |
 | `--evaluation-games N` | `20` | Games against random per evaluation |
 | `--seed N` | `0` | NumPy, PyTorch, MCTS, and replay seed |
 | `--checkpoint PATH` | `checkpoints/latest.pt` | Latest model output path |
+| `--training-state PATH` | `checkpoints/training-state.pt` | Resumable training state output path |
+| `--resume PATH` | | Continue from a saved training state |
 | `--device NAME` | `auto` | `auto`, `cpu`, `cuda`, `mps`, or `tpu` |
 | `--self-play-mode MODE` | `async` | `async` actor-learner overlap or sequential `sync` |
 | `--self-play-queue-size N` | `4` | Completed games buffered between actor and learner |
@@ -68,21 +71,20 @@ This actor is a background thread in the same process, not a distributed
 self-play service. TPU/XLA currently requires `--self-play-mode sync`;
 process-based TPU actors are a future scaling step.
 
-## Replay recency
+## Replay sampling and augmentation
 
 The replay buffer always evicts its oldest complete game when it reaches
-capacity. By default, retained games are sampled with exponential recency
-weighting:
+capacity. Games are sampled uniformly by default, matching the MuZero
+board-game configuration. Exponential recency weighting is available as an
+alternative:
 
 ```text
 weight(age) = 0.5 ** (age / half_life)
 ```
 
-The newest game has age zero. With the default half-life of 100, a game that
-is 100 insertions older has half the sampling weight while remaining available
-to reduce forgetting.
-
-Configure recency explicitly:
+The newest game has age zero. With a half-life of 100, a game that is 100
+insertions older has half the sampling weight while remaining available to
+reduce forgetting.
 
 ```bash
 python -m gomoku_muzero.train \
@@ -90,15 +92,34 @@ python -m gomoku_muzero.train \
   --replay-half-life 100
 ```
 
-Uniform sampling remains available for controlled comparisons:
-
-```bash
-python -m gomoku_muzero.train --replay-sampling uniform
-```
+Every sampled position is additionally transformed by one of the board's
+eight dihedral symmetries (rotations and reflections), applied consistently
+to the observation, the policy targets, and the unrolled actions. This is
+close to a free 8x multiplier on data diversity for Gomoku. Disable it for
+controlled comparisons with `--no-augment`.
 
 Run metrics include `replay_sample_age_mean` and
 `replay_sample_age_max`, making the effective age of optimizer data directly
 observable.
+
+## Resuming an interrupted run
+
+Training writes two files after every iteration: the inference checkpoint
+(`--checkpoint`) and a resumable training state (`--training-state`)
+containing the model, optimizer state, iteration counter, and the replay
+buffer. Continue an interrupted run with:
+
+```bash
+python -m gomoku_muzero.train \
+  --resume checkpoints/training-state.pt \
+  --iterations 50
+```
+
+`--iterations` counts additional iterations on top of the saved counter. The
+board size and win length stored in the state take precedence over the
+command line. A resumed run starts a fresh metrics run directory; RNG state
+is not restored, so resumed runs are not bit-identical to uninterrupted
+ones.
 
 ## Examples
 
@@ -151,13 +172,25 @@ Each completed iteration prints averaged metrics:
 iteration=5 games=2 loss=3.104 policy=2.410 entropy=1.900 kl=0.510 value=0.520 reward=0.174 eval=8W/4D/8L
 ```
 
-- `loss`: policy + value + reward.
-- `policy`: cross-entropy against MCTS root visits.
-- `entropy`: irreducible entropy of the MCTS targets.
-- `kl`: reducible policy error, `policy - entropy`.
-- `value`: value mean squared error.
-- `reward`: reward mean squared error.
+- `loss`: policy + value + reward with the paper's per-unroll-step
+  weighting (the initial prediction keeps weight one, each of the K
+  unrolled steps is scaled by 1/K).
+- `policy`: weighted cross-entropy against MCTS root visits.
+- `entropy`: irreducible entropy of the MCTS targets (diagnostic,
+  unweighted, real positions only).
+- `kl`: reducible policy error, `policy_ce - entropy`.
+- `value`: weighted value mean squared error, including absorbing
+  positions beyond terminal states trained toward zero.
+- `reward`: weighted reward mean squared error.
 - `eval`: wins, draws, and losses against random.
+
+Persisted metrics additionally include `policy_ce` (unweighted
+cross-entropy over searched positions, satisfying
+`policy_ce = entropy + kl`), `grad_norm` (global gradient norm before each
+optimizer step), and `value_calibration_mae` (mean absolute error between
+MCTS root values and final game outcomes for the iteration's new self-play
+games — the single best indicator of whether search value estimates are
+becoming trustworthy).
 
 The total loss is not expected to approach zero:
 
@@ -166,12 +199,11 @@ cross_entropy(p, q) = entropy(p) + KL(p || q)
 ```
 
 For a 10x10 action space, uniform-policy entropy is `ln(100)`, approximately
-`4.605`. Watch KL, value loss, reward loss, and evaluation together. Random
-play is only a smoke-test opponent.
+`4.605`. Watch KL, value loss, reward loss, value calibration, and
+evaluation together. Random play is only a smoke-test opponent.
 
-Training replaces the chosen checkpoint after every completed iteration. It
-currently starts a new model on every invocation; loading a checkpoint to
-resume training is not implemented.
+Training replaces the chosen checkpoint and training state after every
+completed iteration. See "Resuming an interrupted run" above.
 
 ## Recommended configurations
 

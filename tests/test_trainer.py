@@ -42,6 +42,7 @@ def test_compute_loss_returns_finite_scalars() -> None:
         losses.policy,
         losses.value,
         losses.reward,
+        losses.policy_ce,
         losses.policy_target_entropy,
         losses.policy_kl,
     ):
@@ -79,8 +80,10 @@ def test_train_step_updates_parameters_and_reports_metrics() -> None:
         "policy_loss",
         "value_loss",
         "reward_loss",
+        "policy_ce",
         "policy_target_entropy",
         "policy_kl",
+        "grad_norm",
     }
     assert all(np.isfinite(value) for value in metrics.values())
     assert any(
@@ -89,39 +92,34 @@ def test_train_step_updates_parameters_and_reports_metrics() -> None:
     )
 
 
-def test_policy_loss_decomposes_into_entropy_and_kl() -> None:
+def test_policy_ce_decomposes_into_entropy_and_kl() -> None:
     trainer = MuZeroTrainer(MuZeroNetwork(board_size=2, hidden_channels=8))
 
     losses = trainer.compute_loss(make_batch())
 
-    assert losses.policy.item() == pytest.approx(
+    assert losses.policy_ce.item() == pytest.approx(
         losses.policy_target_entropy.item() + losses.policy_kl.item(),
         abs=1e-6,
     )
 
 
-def test_padded_targets_do_not_change_loss() -> None:
+def test_absorbing_padding_is_supervised_toward_zero() -> None:
+    """Value targets beyond terminal are zero and contribute to the loss."""
     torch.manual_seed(0)
     trainer = MuZeroTrainer(MuZeroNetwork(board_size=2, hidden_channels=8))
     batch = make_batch(num_unroll_steps=3)
 
-    changed_rewards = batch.target_rewards.copy()
+    assert np.all(batch.target_values[batch.prediction_mask == 0] == 0)
+    assert np.all(batch.target_rewards[batch.dynamics_mask == 0] == 0)
+
     changed_values = batch.target_values.copy()
-    changed_policies = batch.target_policies.copy()
-    changed_rewards[batch.dynamics_mask == 0] = 99
     changed_values[batch.prediction_mask == 0] = 99
-    changed_policies[batch.prediction_mask == 0] = 99
-    changed = replace(
-        batch,
-        target_rewards=changed_rewards,
-        target_values=changed_values,
-        target_policies=changed_policies,
-    )
+    changed = replace(batch, target_values=changed_values)
 
     original_loss = trainer.compute_loss(batch).total
     changed_loss = trainer.compute_loss(changed).total
 
-    assert changed_loss.item() == pytest.approx(original_loss.item())
+    assert changed_loss.item() != pytest.approx(original_loss.item())
 
 
 def test_zero_step_unroll_has_no_reward_loss() -> None:

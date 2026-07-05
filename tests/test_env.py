@@ -96,6 +96,16 @@ def test_rejects_illegal_actions_and_steps_after_game() -> None:
         env.step(9)
 
 
+def test_terminal_move_still_advances_current_player() -> None:
+    """The to-play plane must stay consistent with alternating perspective."""
+    env = GomokuEnv(board_size=5, win_length=5)
+    play(env, [0, 5, 1, 6, 2, 7, 3, 8, 4])  # black wins on the top row
+
+    assert env.winner == env.BLACK
+    assert env.current_player == env.WHITE
+    assert env.observation()[2].sum() == 0  # white shown as next to play
+
+
 def test_clone_is_independent() -> None:
     env = GomokuEnv(board_size=5, win_length=5)
     env.step(0)

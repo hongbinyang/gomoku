@@ -66,11 +66,20 @@ public classes are also importable from the root `gomoku_muzero` package.
 - Transition reward: scalar from the player who selected the action.
 - Terminal outcome: black's result (`+1`, `0`, or `-1`); value targets are
   signed for the player at each position.
+- `current_player` advances after every move, including terminal ones, so
+  the observation's to-play plane and `GameHistory.to_play` always agree.
+  Read the result from `winner`, never from `current_player`.
 
 These conventions make alternating-player backup explicit:
 
 ```text
 parent_value = child_reward - discount * child_value
 ```
+
+During selection, PUCT normalizes visited children's Q values to `[0, 1]`
+with the minimum and maximum observed inside the current search
+(`MinMaxStats`), and the exploration coefficient grows logarithmically with
+the parent visit count (`pb_c_init`, `pb_c_base`), following the MuZero
+paper.
 
 See [MuZero walkthrough](muzero-walkthrough.md) for the end-to-end data flow.

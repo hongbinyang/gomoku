@@ -82,13 +82,17 @@ class SelfPlayActor:
         self._stop = Event()
         self._thread: Thread | None = None
         self._error: BaseException | None = None
+        # Guards the counters below, which the actor thread writes and the
+        # learner thread reads for metrics.
+        self._stats_lock = Lock()
         self._games_generated = 0
         self._self_play_seconds = 0.0
         self._version = -1
 
     @property
     def games_generated(self) -> int:
-        return self._games_generated
+        with self._stats_lock:
+            return self._games_generated
 
     @property
     def queue_size(self) -> int:
@@ -96,13 +100,15 @@ class SelfPlayActor:
 
     @property
     def network_version(self) -> int:
-        return self._version
+        with self._stats_lock:
+            return self._version
 
     @property
     def games_per_second(self) -> float:
-        if self._self_play_seconds == 0:
-            return 0.0
-        return self._games_generated / self._self_play_seconds
+        with self._stats_lock:
+            if self._self_play_seconds == 0:
+                return 0.0
+            return self._games_generated / self._self_play_seconds
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -140,24 +146,28 @@ class SelfPlayActor:
             ).to(self.device)
             mcts = MCTS(network, self.mcts_config, seed=self.seed)
 
+            version = -1
             while not self._stop.is_set():
-                update = self.weights.newer_than(self._version)
+                update = self.weights.newer_than(version)
                 if update is not None:
-                    self._version, state_dict = update
+                    version, state_dict = update
                     network.load_state_dict(state_dict)
                     network.eval()
+                    with self._stats_lock:
+                        self._version = version
 
                 started = perf_counter()
                 game = play_self_play_game(
                     env, mcts, self.self_play_config
                 )
                 elapsed = perf_counter() - started
-                game.network_version = self._version
+                game.network_version = version
                 while not self._stop.is_set():
                     try:
                         self.games.put(game, timeout=0.25)
-                        self._games_generated += 1
-                        self._self_play_seconds += elapsed
+                        with self._stats_lock:
+                            self._games_generated += 1
+                            self._self_play_seconds += elapsed
                         break
                     except Full:
                         continue

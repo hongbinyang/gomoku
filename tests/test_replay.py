@@ -73,7 +73,10 @@ def test_sample_near_terminal_is_padded_and_masked() -> None:
 
     batch = buffer.sample_batch(batch_size=1, num_unroll_steps=3)
 
-    np.testing.assert_array_equal(batch.actions[0], [0, 0, 0])
+    # The real transition keeps its action; absorbing padding carries
+    # random in-range actions with zero reward and value targets.
+    assert batch.actions[0][0] == 0
+    assert all(0 <= action < 4 for action in batch.actions[0])
     np.testing.assert_array_equal(batch.target_rewards[0], [1.0, 0.0, 0.0])
     np.testing.assert_array_equal(batch.dynamics_mask[0], [1.0, 0.0, 0.0])
     np.testing.assert_array_equal(
@@ -113,6 +116,88 @@ def test_recent_sampling_favors_newer_games() -> None:
 
     assert np.count_nonzero(markers == 3) > np.count_nonzero(markers == 0)
     assert batch.sampled_game_ages.mean() < 1.0
+
+
+def test_symmetry_augmentation_keeps_sample_consistent() -> None:
+    """Observation, policy, and action must transform together."""
+    buffer = ReplayBuffer(
+        capacity=1,
+        action_space_size=4,
+        seed=3,
+        augment_symmetries=True,
+    )
+    # One move at cell 1; plane 0 marks that cell, policy is one-hot there.
+    observations = [
+        np.zeros((3, 2, 2), dtype=np.float32),
+        np.zeros((3, 2, 2), dtype=np.float32),
+    ]
+    observations[0][0, 0, 1] = 1.0
+    policies = [
+        np.eye(4, dtype=np.float32)[1],
+        np.zeros(4, dtype=np.float32),
+    ]
+    buffer.save_game(
+        GameHistory(
+            observations=observations,
+            actions=[1],
+            rewards=[1.0],
+            policies=policies,
+            values=[1.0, 0.0],
+            to_play=[1, -1],
+        )
+    )
+
+    batch = buffer.sample_batch(batch_size=64, num_unroll_steps=0)
+
+    for sample in range(64):
+        marked_cell = int(batch.observations[sample][0].ravel().argmax())
+        policy_cell = int(batch.target_policies[sample][0].argmax())
+        assert marked_cell == policy_cell
+    # Across many samples every corner should appear at least once.
+    assert len(
+        {int(row[0].ravel().argmax()) for row in batch.observations}
+    ) == 4
+
+
+def test_augmented_actions_follow_the_same_symmetry() -> None:
+    buffer = ReplayBuffer(
+        capacity=1,
+        action_space_size=4,
+        seed=5,
+        augment_symmetries=True,
+    )
+    observations = [
+        np.zeros((3, 2, 2), dtype=np.float32),
+        np.zeros((3, 2, 2), dtype=np.float32),
+    ]
+    observations[0][0, 0, 1] = 1.0
+    buffer.save_game(
+        GameHistory(
+            observations=observations,
+            actions=[1],
+            rewards=[1.0],
+            policies=[
+                np.eye(4, dtype=np.float32)[1],
+                np.zeros(4, dtype=np.float32),
+            ],
+            values=[1.0, 0.0],
+            to_play=[1, -1],
+        )
+    )
+
+    batch = buffer.sample_batch(batch_size=64, num_unroll_steps=1)
+
+    for sample in range(64):
+        marked_cell = int(batch.observations[sample][0].ravel().argmax())
+        assert int(batch.actions[sample][0]) == marked_cell
+
+
+def test_root_values_length_is_validated() -> None:
+    game = make_game()
+    game.root_values = [0.0]
+
+    with pytest.raises(ValueError, match="root_values"):
+        game.validate(action_space_size=4)
 
 
 def test_uniform_sampling_remains_available() -> None:
