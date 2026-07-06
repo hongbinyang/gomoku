@@ -19,6 +19,12 @@ python -m pytest
 python -c "from gomoku_muzero.runtime.device import resolve_device; print(resolve_device('auto').description)"
 ```
 
+The examples below pass `--device mps` (Apple Silicon) explicitly, which
+fails fast if MPS is unavailable; `--device auto` selects the same backend
+when MPS is present. On this small network, batch-of-one MCTS inference can
+run faster on `cpu` than on `mps` — compare the `games_per_second` metric
+between short runs of each before committing to a long experiment.
+
 ## 2. Run a quick validation experiment
 
 Use a unique run name:
@@ -32,7 +38,7 @@ python -m gomoku_muzero.train \
   --games-per-iteration 2 \
   --training-steps 2 \
   --batch-size 8 \
-  --device auto \
+  --device mps \
   --self-play-mode async \
   --run-name smoke-test \
   --checkpoint checkpoints/smoke-test.pt
@@ -70,7 +76,7 @@ python -m gomoku_muzero.train \
   --replay-half-life 200 \
   --self-play-mode async \
   --self-play-queue-size 4 \
-  --device auto \
+  --device mps \
   --evaluation-interval 10 \
   --evaluation-games 50 \
   --run-name baseline-10x10 \
@@ -154,7 +160,7 @@ python -m gomoku_muzero.play \
   --checkpoint checkpoints/baseline-10x10.pt \
   --human-color black \
   --simulations 200 \
-  --device auto
+  --device mps
 ```
 
 Play as white by replacing `black` with `white`. Enter moves as zero-based
