@@ -35,6 +35,7 @@ class AsyncMuZeroPipeline(MuZeroPipeline):
             self_play_config=self.self_play_config,
             queue_size=self_play_queue_size,
             seed=actor_seed,
+            num_blocks=network.num_blocks,
         )
         self._policy_lag_mean = 0.0
         self._policy_lag_max = 0.0

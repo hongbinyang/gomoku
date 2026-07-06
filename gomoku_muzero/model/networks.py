@@ -1,4 +1,13 @@
-"""Small neural networks for MuZero's learned model."""
+"""Residual-tower neural networks for MuZero's learned model.
+
+Follows the MuZero paper's board-game architecture at reduced scale: a
+residual tower in the representation function, a shallower residual tower
+in the dynamics function, and thin convolutional heads in the prediction
+function. Hidden states are min-max scaled to ``[0, 1]`` per sample
+(Appendix G of the paper) after both the representation and dynamics
+functions. GroupNorm with a single group replaces BatchNorm so behavior is
+independent of batch size, which matters for batch-of-one MCTS inference.
+"""
 
 from __future__ import annotations
 
@@ -26,50 +35,94 @@ class RecurrentInferenceOutput(NamedTuple):
     value: Tensor
 
 
+class ResidualBlock(nn.Module):
+    """Standard residual block: conv-norm-relu, conv-norm, skip, relu."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.norm1 = nn.GroupNorm(1, channels)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.norm2 = nn.GroupNorm(1, channels)
+
+    def forward(self, x: Tensor) -> Tensor:
+        residual = x
+        x = F.relu(self.norm1(self.conv1(x)))
+        x = self.norm2(self.conv2(x))
+        return F.relu(x + residual)
+
+
+def scale_hidden_state(hidden_state: Tensor) -> Tensor:
+    """Min-max scale each sample's hidden state to ``[0, 1]``.
+
+    This is the paper's hidden-state normalization (Appendix G), keeping
+    the latent space bounded so the dynamics function cannot drift
+    arbitrarily during deep unrolls or long searches.
+    """
+    flat = hidden_state.flatten(start_dim=1)
+    minimum = flat.min(dim=1, keepdim=True).values
+    maximum = flat.max(dim=1, keepdim=True).values
+    scale = (maximum - minimum).clamp_min(1e-5)
+    scaled = (flat - minimum) / scale
+    return scaled.view_as(hidden_state)
+
+
 class RepresentationNetwork(nn.Module):
     """MuZero's h: encode an observation as a spatial hidden state."""
 
-    def __init__(self, hidden_channels: int = 32) -> None:
+    def __init__(
+        self, hidden_channels: int = 64, num_blocks: int = 4
+    ) -> None:
         super().__init__()
-        self.net = nn.Sequential(
+        self.stem = nn.Sequential(
             nn.Conv2d(3, hidden_channels, kernel_size=3, padding=1),
+            nn.GroupNorm(1, hidden_channels),
             nn.ReLU(),
-            nn.Conv2d(
-                hidden_channels, hidden_channels, kernel_size=3, padding=1
-            ),
-            nn.Tanh(),
+        )
+        self.tower = nn.Sequential(
+            *(ResidualBlock(hidden_channels) for _ in range(num_blocks))
         )
 
     def forward(self, observation: Tensor) -> Tensor:
-        """Map ``[B, 3, N, N]`` to ``[B, C, N, N]``."""
+        """Map ``[B, 3, N, N]`` to ``[B, C, N, N]`` scaled to ``[0, 1]``."""
         if observation.ndim != 4 or observation.shape[1] != 3:
             raise ValueError("observation must have shape [B, 3, N, N]")
-        return self.net(observation)
+        return scale_hidden_state(self.tower(self.stem(observation)))
 
 
 class DynamicsNetwork(nn.Module):
-    """MuZero's g: predict the next hidden state and immediate reward."""
+    """MuZero's g: predict the next hidden state and immediate reward.
+
+    Uses half the representation tower's depth: the dynamics function runs
+    once per MCTS simulation and K times per training sample, so it is the
+    hot path, and one latent move changes the position far less than
+    encoding a raw observation does.
+    """
 
     def __init__(
         self,
         board_size: int,
-        hidden_channels: int = 32,
+        hidden_channels: int = 64,
+        num_blocks: int = 4,
     ) -> None:
         super().__init__()
         self.board_size = board_size
         self.action_space_size = board_size * board_size
-        self.transition = nn.Sequential(
+        self.stem = nn.Sequential(
             nn.Conv2d(
                 hidden_channels + 1,
                 hidden_channels,
                 kernel_size=3,
                 padding=1,
             ),
+            nn.GroupNorm(1, hidden_channels),
             nn.ReLU(),
-            nn.Conv2d(
-                hidden_channels, hidden_channels, kernel_size=3, padding=1
-            ),
-            nn.Tanh(),
+        )
+        self.tower = nn.Sequential(
+            *(
+                ResidualBlock(hidden_channels)
+                for _ in range(max(1, num_blocks // 2))
+            )
         )
         self.reward_head = nn.Sequential(
             nn.Conv2d(hidden_channels, 1, kernel_size=1),
@@ -91,9 +144,10 @@ class DynamicsNetwork(nn.Module):
             hidden_state.shape[0], 1, self.board_size, self.board_size
         )
 
-        next_hidden_state = self.transition(
-            torch.cat((hidden_state, action_plane), dim=1)
+        next_hidden_state = self.tower(
+            self.stem(torch.cat((hidden_state, action_plane), dim=1))
         )
+        next_hidden_state = scale_hidden_state(next_hidden_state)
         reward = self.reward_head(next_hidden_state)
         return next_hidden_state, reward
 
@@ -114,12 +168,12 @@ class DynamicsNetwork(nn.Module):
 
 
 class PredictionNetwork(nn.Module):
-    """MuZero's f: predict policy logits and value from a hidden state."""
+    """MuZero's f: thin policy and value heads over the shared tower."""
 
     def __init__(
         self,
         board_size: int,
-        hidden_channels: int = 32,
+        hidden_channels: int = 64,
     ) -> None:
         super().__init__()
         action_space_size = board_size * board_size
@@ -148,19 +202,27 @@ class MuZeroNetwork(nn.Module):
     def __init__(
         self,
         board_size: int = 10,
-        hidden_channels: int = 32,
+        hidden_channels: int = 64,
+        num_blocks: int = 4,
     ) -> None:
         super().__init__()
         if board_size < 1:
             raise ValueError("board_size must be positive")
         if hidden_channels < 1:
             raise ValueError("hidden_channels must be positive")
+        if num_blocks < 1:
+            raise ValueError("num_blocks must be positive")
 
         self.board_size = board_size
         self.hidden_channels = hidden_channels
+        self.num_blocks = num_blocks
         self.action_space_size = board_size * board_size
-        self.representation = RepresentationNetwork(hidden_channels)
-        self.dynamics = DynamicsNetwork(board_size, hidden_channels)
+        self.representation = RepresentationNetwork(
+            hidden_channels, num_blocks
+        )
+        self.dynamics = DynamicsNetwork(
+            board_size, hidden_channels, num_blocks
+        )
         self.prediction = PredictionNetwork(board_size, hidden_channels)
 
     def initial_inference(self, observation: Tensor) -> InitialInferenceOutput:

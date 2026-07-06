@@ -78,6 +78,21 @@ def main() -> None:
         help="recurrent dynamics steps per sample (default: 5)",
     )
     parser.add_argument(
+        "--hidden-channels",
+        type=int,
+        default=64,
+        help="channels in the residual towers (default: 64)",
+    )
+    parser.add_argument(
+        "--res-blocks",
+        type=int,
+        default=4,
+        help=(
+            "residual blocks in the representation tower; dynamics uses "
+            "half (default: 4)"
+        ),
+    )
+    parser.add_argument(
         "--learning-rate",
         type=float,
         default=1e-3,
@@ -215,7 +230,8 @@ def main() -> None:
     else:
         network = MuZeroNetwork(
             board_size=args.board_size,
-            hidden_channels=32,
+            hidden_channels=args.hidden_channels,
+            num_blocks=args.res_blocks,
         ).to(device.torch_device)
     mcts = MCTS(
         network,

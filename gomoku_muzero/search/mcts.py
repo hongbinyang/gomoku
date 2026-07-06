@@ -104,11 +104,19 @@ class MCTS:
         to_play: int,
         add_exploration_noise: bool = False,
         progress_callback: Callable[[int, int], None] | None = None,
+        reuse_root: Node | None = None,
     ) -> Node:
         """Build and return a search tree rooted at a real observation.
 
         The input observation has shape ``[3,N,N]`` (or batched
         ``[1,3,N,N]``). Search inference always uses batch size one.
+
+        ``reuse_root`` may pass the subtree that a previous search built
+        under the action that was actually played. Its statistics are kept
+        and its hidden state is re-grounded on the real observation via
+        the representation function. ``num_simulations`` then acts as a
+        target for the root's total visit count: only the missing
+        simulations are run (always at least one).
         """
         legal_actions = self._validate_legal_actions(legal_actions)
         if to_play not in (-1, 1):
@@ -119,21 +127,34 @@ class MCTS:
         with torch.inference_mode():
             initial = self.network.initial_inference(observation_tensor)
 
-        root = Node(
-            prior=1.0,
-            to_play=to_play,
-            hidden_state=initial.hidden_state.detach(),
-            predicted_value=float(initial.value.item()),
-        )
-        self._expand(root, legal_actions, initial.policy_logits[0])
+        root: Node | None = None
+        if (
+            reuse_root is not None
+            and reuse_root.children
+            and reuse_root.to_play == to_play
+            and set(reuse_root.children) == set(legal_actions)
+        ):
+            root = reuse_root
+            root.reward = 0.0
+            root.hidden_state = initial.hidden_state.detach()
+            root.predicted_value = float(initial.value.item())
+        if root is None:
+            root = Node(
+                prior=1.0,
+                to_play=to_play,
+                hidden_state=initial.hidden_state.detach(),
+                predicted_value=float(initial.value.item()),
+            )
+            self._expand(root, legal_actions, initial.policy_logits[0])
         if add_exploration_noise:
             self.add_exploration_noise(root)
 
-        min_max_stats = MinMaxStats()
-        report_every = max(
-            1, (self.config.num_simulations + 19) // 20
+        num_simulations = max(
+            1, self.config.num_simulations - root.visit_count
         )
-        for simulation in range(1, self.config.num_simulations + 1):
+        min_max_stats = MinMaxStats()
+        report_every = max(1, (num_simulations + 19) // 20)
+        for simulation in range(1, num_simulations + 1):
             node = root
             search_path = [node]
             action_path: list[int] = []
@@ -181,11 +202,9 @@ class MCTS:
             self.backup(search_path, leaf_value, min_max_stats)
             if progress_callback is not None and (
                 simulation % report_every == 0
-                or simulation == self.config.num_simulations
+                or simulation == num_simulations
             ):
-                progress_callback(
-                    simulation, self.config.num_simulations
-                )
+                progress_callback(simulation, num_simulations)
 
         return root
 

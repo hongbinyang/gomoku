@@ -22,6 +22,8 @@ With no options it uses a 10x10 board and writes
 | `--training-steps N` | `10` | Optimizer updates per iteration |
 | `--batch-size N` | `32` | Replay samples per update |
 | `--unroll-steps N` | `5` | Recurrent dynamics steps per sample |
+| `--hidden-channels N` | `64` | Channels in the residual towers |
+| `--res-blocks N` | `4` | Representation tower depth; dynamics uses half |
 | `--learning-rate X` | `0.001` | Adam learning rate |
 | `--replay-capacity N` | `500` | Maximum games retained |
 | `--replay-sampling MODE` | `uniform` | Baseline `uniform` or recency-weighted `recent` |
@@ -116,10 +118,14 @@ python -m gomoku_muzero.train \
 ```
 
 `--iterations` counts additional iterations on top of the saved counter. The
-board size and win length stored in the state take precedence over the
-command line. A resumed run starts a fresh metrics run directory; RNG state
-is not restored, so resumed runs are not bit-identical to uninterrupted
-ones.
+board size, win length, and network architecture stored in the state take
+precedence over the command line. A resumed run starts a fresh metrics run
+directory; RNG state is not restored, so resumed runs are not bit-identical
+to uninterrupted ones.
+
+Checkpoints and training states use format version 2 (residual-tower
+networks). Files saved before the architecture change cannot be loaded and
+those models must be retrained.
 
 ## Examples
 
@@ -256,9 +262,10 @@ together. Human play should eventually reveal threat completion, defensive
 blocking, and fewer immediate tactical mistakes.
 
 Long configurations can take many hours or days because MCTS inference is
-unbatched and the current asynchronous pipeline uses one self-play actor. The
-32-channel network, random-only evaluation, lack of best-checkpoint selection,
-and single actor will eventually limit further improvement.
+unbatched and the current asynchronous pipeline uses one self-play actor.
+Tree reuse between consecutive self-play moves reduces the simulations each
+move must run, but random-only evaluation, lack of best-checkpoint
+selection, and the single actor will eventually limit further improvement.
 
 See [Metrics and visualization](metrics.md) for persisted timing, throughput,
 policy lag, device memory, TensorBoard, and static plots.

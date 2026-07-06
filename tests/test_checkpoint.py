@@ -32,7 +32,7 @@ def make_game() -> GameHistory:
 
 def test_training_state_round_trip(tmp_path) -> None:
     torch.manual_seed(0)
-    network = MuZeroNetwork(board_size=2, hidden_channels=4)
+    network = MuZeroNetwork(board_size=2, hidden_channels=4, num_blocks=2)
     trainer = MuZeroTrainer(network, learning_rate=1e-2)
     path = tmp_path / "training-state.pt"
 
@@ -50,6 +50,8 @@ def test_training_state_round_trip(tmp_path) -> None:
     assert loaded.board_size == 2
     assert loaded.win_length == 2
     assert loaded.hidden_channels == 4
+    assert loaded.num_blocks == 2
+    assert loaded.network.num_blocks == 2
     for expected, actual in zip(
         network.parameters(), loaded.network.parameters()
     ):

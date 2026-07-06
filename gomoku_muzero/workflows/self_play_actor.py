@@ -67,12 +67,14 @@ class SelfPlayActor:
         self_play_config: SelfPlayConfig,
         queue_size: int = 4,
         seed: int = 0,
+        num_blocks: int = 4,
     ) -> None:
         if queue_size < 1:
             raise ValueError("queue_size must be positive")
         self.board_size = board_size
         self.win_length = win_length
         self.hidden_channels = hidden_channels
+        self.num_blocks = num_blocks
         self.device = device
         self.weights = weights
         self.mcts_config = mcts_config
@@ -142,7 +144,7 @@ class SelfPlayActor:
         try:
             env = GomokuEnv(self.board_size, self.win_length)
             network = MuZeroNetwork(
-                self.board_size, self.hidden_channels
+                self.board_size, self.hidden_channels, self.num_blocks
             ).to(self.device)
             mcts = MCTS(network, self.mcts_config, seed=self.seed)
 

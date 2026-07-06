@@ -17,6 +17,31 @@ def test_initial_inference_shapes() -> None:
     assert torch.all(output.value <= 1)
 
 
+def test_hidden_states_are_min_max_scaled() -> None:
+    """Both h and g outputs stay in [0, 1] per the paper's Appendix G."""
+    network = MuZeroNetwork(board_size=5, hidden_channels=16, num_blocks=2)
+    initial = network.initial_inference(torch.randn(3, 3, 5, 5))
+    recurrent = network.recurrent_inference(
+        initial.hidden_state, torch.tensor([0, 7, 24])
+    )
+
+    for hidden in (initial.hidden_state, recurrent.hidden_state):
+        assert torch.all(hidden >= 0)
+        assert torch.all(hidden <= 1)
+        # The full range is used: every sample touches both bounds.
+        flat = hidden.flatten(start_dim=1)
+        assert torch.allclose(flat.min(dim=1).values, torch.zeros(3))
+        assert torch.allclose(flat.max(dim=1).values, torch.ones(3))
+
+
+def test_dynamics_tower_is_half_depth() -> None:
+    network = MuZeroNetwork(board_size=3, hidden_channels=8, num_blocks=4)
+
+    assert len(network.representation.tower) == 4
+    assert len(network.dynamics.tower) == 2
+    assert network.num_blocks == 4
+
+
 def test_recurrent_inference_shapes() -> None:
     network = MuZeroNetwork(board_size=5, hidden_channels=16)
     root = network.initial_inference(torch.zeros(2, 3, 5, 5))

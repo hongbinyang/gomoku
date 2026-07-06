@@ -14,11 +14,17 @@ from gomoku_muzero.training.replay import GameHistory
 
 @dataclass(frozen=True)
 class SelfPlayConfig:
-    """Controls exploration when selecting actions from root visits."""
+    """Controls exploration when selecting actions from root visits.
+
+    ``reuse_tree`` carries the played action's subtree into the next
+    move's search, so only the simulations missing from the target visit
+    count need to run.
+    """
 
     temperature: float = 1.0
     temperature_moves: int = 8
     add_exploration_noise: bool = True
+    reuse_tree: bool = True
 
 
 def play_self_play_game(
@@ -40,6 +46,7 @@ def play_self_play_game(
     policies: list[np.ndarray] = []
     root_values: list[float] = []
     to_play = [env.current_player]
+    reuse_root = None
 
     while not env.terminated:
         move_number = len(actions) + 1
@@ -55,6 +62,7 @@ def play_self_play_game(
                     move_number, completed, total
                 )
             ),
+            reuse_root=reuse_root,
         )
         policies.append(mcts.policy_target(root))
         root_values.append(root.value)
@@ -64,6 +72,9 @@ def play_self_play_game(
             else 0.0
         )
         action = mcts.select_action(root, temperature)
+        reuse_root = (
+            root.children.get(action) if config.reuse_tree else None
+        )
         observation, reward, _, info = env.step(action)
 
         actions.append(action)

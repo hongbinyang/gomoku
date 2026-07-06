@@ -20,8 +20,14 @@ python -m pytest tests/test_env.py
   `[B, 1]`
 - Prediction `f`: hidden state to policy logits `[B, N*N]` and value `[B, 1]`
 
-Policy outputs are raw logits; legal masking and softmax belong to MCTS. Value
-uses `tanh` because Gomoku outcomes lie in `[-1, 1]`.
+Following the paper's board-game architecture at reduced scale, `h` is a
+residual tower (default 4 blocks, 64 channels, GroupNorm), `g` is a
+half-depth residual tower over the hidden state concatenated with a one-hot
+action plane, and `f` is a pair of thin convolutional heads. Hidden states
+are min-max scaled to `[0, 1]` per sample after both `h` and `g` (Appendix
+G), bounding the latent space during deep unrolls. Policy outputs are raw
+logits; legal masking and softmax belong to MCTS. Value uses `tanh` because
+Gomoku outcomes lie in `[-1, 1]`.
 
 ```bash
 python -m pytest tests/test_networks.py
@@ -49,6 +55,11 @@ A node stores:
 
 The policy training target is normalized root visit counts, not raw network
 policy. Optional Dirichlet noise diversifies self-play roots.
+
+Self-play reuses the played action's subtree as the next move's root: its
+statistics are kept, its hidden state is re-grounded on the real
+observation through `h`, and `num_simulations` becomes a target for the
+root's total visit count, so only the missing simulations run.
 
 ```bash
 python -m pytest tests/test_mcts.py

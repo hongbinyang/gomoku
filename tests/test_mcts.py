@@ -144,6 +144,50 @@ def test_childless_leaves_are_not_reexpanded() -> None:
     assert network.recurrent_calls == 1
 
 
+def test_reused_subtree_keeps_statistics_and_tops_up_visits() -> None:
+    search = make_search(num_simulations=8)
+    first_root = search.run(
+        np.zeros((3, 2, 2), dtype=np.float32),
+        legal_actions=[1, 3],
+        to_play=1,
+    )
+    subtree = first_root.children[3]
+    carried_visits = subtree.visit_count
+    assert carried_visits > 0
+
+    second_root = search.run(
+        np.zeros((3, 2, 2), dtype=np.float32),
+        legal_actions=[1],
+        to_play=-1,
+        reuse_root=subtree,
+    )
+
+    assert second_root is subtree
+    assert second_root.reward == 0.0
+    # Only the missing simulations run: the budget counts carried visits.
+    assert second_root.visit_count == max(carried_visits + 1, 8)
+
+
+def test_mismatched_subtree_is_not_reused() -> None:
+    search = make_search(num_simulations=4)
+    first_root = search.run(
+        np.zeros((3, 2, 2), dtype=np.float32),
+        legal_actions=[1, 3],
+        to_play=1,
+    )
+
+    # Wrong player for this subtree, so a fresh root must be built.
+    second_root = search.run(
+        np.zeros((3, 2, 2), dtype=np.float32),
+        legal_actions=[1],
+        to_play=1,
+        reuse_root=first_root.children[3],
+    )
+
+    assert second_root is not first_root.children[3]
+    assert second_root.visit_count == 4
+
+
 def test_search_reports_simulation_progress() -> None:
     updates: list[tuple[int, int]] = []
 

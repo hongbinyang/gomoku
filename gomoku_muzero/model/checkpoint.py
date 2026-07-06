@@ -31,6 +31,7 @@ class LoadedTrainingState:
     board_size: int
     win_length: int
     hidden_channels: int
+    num_blocks: int
 
 
 def save_checkpoint(
@@ -47,10 +48,11 @@ def save_checkpoint(
     }
     torch.save(
         {
-            "format_version": 1,
+            "format_version": 2,
             "board_size": network.board_size,
             "win_length": win_length,
             "hidden_channels": network.hidden_channels,
+            "num_blocks": network.num_blocks,
             "model_state_dict": cpu_state_dict,
         },
         checkpoint_path,
@@ -71,13 +73,17 @@ def load_checkpoint(
         map_location="cpu",
         weights_only=True,
     )
-    if data.get("format_version") != 1:
-        raise ValueError("unsupported checkpoint format")
+    if data.get("format_version") != 2:
+        raise ValueError(
+            "unsupported checkpoint format; format 1 checkpoints predate "
+            "the residual-tower architecture and must be retrained"
+        )
 
     board_size = int(data["board_size"])
     win_length = int(data["win_length"])
     hidden_channels = int(data["hidden_channels"])
-    network = MuZeroNetwork(board_size, hidden_channels)
+    num_blocks = int(data["num_blocks"])
+    network = MuZeroNetwork(board_size, hidden_channels, num_blocks)
     network.load_state_dict(data["model_state_dict"])
     network.to(device)
     network.eval()
@@ -101,11 +107,12 @@ def save_training_state(
     state_path = Path(path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "format_version": 1,
+        "format_version": 2,
         "iteration": iteration,
         "board_size": network.board_size,
         "win_length": win_length,
         "hidden_channels": network.hidden_channels,
+        "num_blocks": network.num_blocks,
         "model_state_dict": {
             name: tensor.detach().cpu()
             for name, tensor in network.state_dict().items()
@@ -128,11 +135,17 @@ def load_training_state(
     if not state_path.is_file():
         raise FileNotFoundError(f"training state not found: {state_path}")
     data = torch.load(state_path, map_location="cpu", weights_only=True)
-    if data.get("format_version") != 1:
-        raise ValueError("unsupported training state format")
+    if data.get("format_version") != 2:
+        raise ValueError(
+            "unsupported training state format; format 1 states predate "
+            "the residual-tower architecture and must be retrained"
+        )
 
     board_size = int(data["board_size"])
-    network = MuZeroNetwork(board_size, int(data["hidden_channels"]))
+    num_blocks = int(data["num_blocks"])
+    network = MuZeroNetwork(
+        board_size, int(data["hidden_channels"]), num_blocks
+    )
     network.load_state_dict(data["model_state_dict"])
     network.to(device)
     return LoadedTrainingState(
@@ -143,6 +156,7 @@ def load_training_state(
         board_size=board_size,
         win_length=int(data["win_length"]),
         hidden_channels=int(data["hidden_channels"]),
+        num_blocks=num_blocks,
     )
 
 
