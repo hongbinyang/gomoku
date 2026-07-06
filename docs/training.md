@@ -25,6 +25,9 @@ With no options it uses a 10x10 board and writes
 | `--hidden-channels N` | `64` | Channels in the residual towers |
 | `--res-blocks N` | `4` | Representation tower depth; dynamics uses half |
 | `--learning-rate X` | `0.001` | Adam learning rate |
+| `--value-loss-weight X` | `1.0` | Relative weight of the value objective |
+| `--temperature-moves N` | `8` | Opening moves sampled at temperature 1 |
+| `--dirichlet-alpha X` | `0.3` | Root noise concentration (about 10/branching) |
 | `--replay-capacity N` | `500` | Maximum games retained |
 | `--replay-sampling MODE` | `uniform` | Baseline `uniform` or recency-weighted `recent` |
 | `--replay-half-life N` | `100` | Recency half-life measured in games |
@@ -221,8 +224,8 @@ optimizer updates, not only more MCTS simulations.
 | --- | ---: | ---: | ---: | ---: |
 | Quick validation | `20` | `25` | `4` | `20` |
 | Playable experiment | `100` | `75` | `10` | `50` |
-| Recommended baseline | `200` | `100` | `10` | `50` |
-| Longer run | `500` | `200` | `20` | `100` |
+| Recommended baseline | `500` | `100` | `10` | `50` |
+| Longer run | `1000` | `200` | `20` | `100` |
 
 The recommended 10x10 baseline is:
 
@@ -230,25 +233,41 @@ The recommended 10x10 baseline is:
 python -m gomoku_muzero.train \
   --board-size 10 \
   --win-length 5 \
-  --iterations 200 \
+  --iterations 500 \
   --simulations 100 \
   --games-per-iteration 10 \
   --training-steps 50 \
   --batch-size 64 \
   --unroll-steps 5 \
   --learning-rate 0.0003 \
+  --value-loss-weight 2.0 \
+  --temperature-moves 16 \
+  --dirichlet-alpha 0.15 \
   --replay-capacity 2000 \
   --replay-sampling recent \
   --replay-half-life 200 \
   --evaluation-interval 10 \
   --evaluation-games 50 \
-  --checkpoint checkpoints/gomoku-10x10.pt \
+  --run-name baseline-10x10 \
+  --checkpoint checkpoints/baseline-10x10.pt \
+  --training-state checkpoints/baseline-10x10-state.pt \
   --seed 0
 ```
 
-This configuration generates 2,000 self-play games and performs 10,000
+This configuration generates 5,000 self-play games and performs 25,000
 optimizer updates. It is a starting point rather than a guarantee of playing
 strength.
+
+The three exploration and objective settings address the slowest-learning
+signal, the value function. `--temperature-moves 16` keeps openings diverse
+for longer so game outcomes carry learnable signal instead of repeating one
+line; `--dirichlet-alpha 0.15` matches the paper's 10/branching heuristic
+for a roughly 100-move action space; `--value-loss-weight 2.0` biases
+optimization toward the value head once outcomes become predictable. Watch
+`value_calibration_mae`: it falling below roughly `0.9` marks the point
+where search values become trustworthy; if it stays near `1.0` for
+thousands of games, extend `--temperature-moves` rather than adding
+iterations.
 
 When allocating additional computation, prioritize:
 

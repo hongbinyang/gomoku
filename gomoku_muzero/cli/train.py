@@ -24,7 +24,8 @@ from gomoku_muzero.runtime.metrics import RunLogger
 from gomoku_muzero.training.async_pipeline import AsyncMuZeroPipeline
 from gomoku_muzero.training.pipeline import LearningConfig, MuZeroPipeline
 from gomoku_muzero.training.replay import ReplayBuffer
-from gomoku_muzero.training.trainer import MuZeroTrainer
+from gomoku_muzero.training.trainer import LossWeights, MuZeroTrainer
+from gomoku_muzero.workflows.self_play import SelfPlayConfig
 
 
 def main() -> None:
@@ -97,6 +98,30 @@ def main() -> None:
         type=float,
         default=1e-3,
         help="Adam learning rate (default: 0.001)",
+    )
+    parser.add_argument(
+        "--value-loss-weight",
+        type=float,
+        default=1.0,
+        help="relative weight of the value objective (default: 1.0)",
+    )
+    parser.add_argument(
+        "--temperature-moves",
+        type=int,
+        default=8,
+        help=(
+            "opening moves sampled at temperature 1 before greedy play "
+            "(default: 8)"
+        ),
+    )
+    parser.add_argument(
+        "--dirichlet-alpha",
+        type=float,
+        default=0.3,
+        help=(
+            "root Dirichlet noise concentration; the paper scales this "
+            "roughly as 10/branching-factor (default: 0.3)"
+        ),
     )
     parser.add_argument(
         "--replay-capacity",
@@ -235,7 +260,10 @@ def main() -> None:
         ).to(device.torch_device)
     mcts = MCTS(
         network,
-        MCTSConfig(num_simulations=args.simulations),
+        MCTSConfig(
+            num_simulations=args.simulations,
+            dirichlet_alpha=args.dirichlet_alpha,
+        ),
         seed=args.seed,
     )
     replay = ReplayBuffer(
@@ -249,6 +277,7 @@ def main() -> None:
     trainer = MuZeroTrainer(
         network,
         learning_rate=args.learning_rate,
+        loss_weights=LossWeights(value=args.value_loss_weight),
     )
     if resumed_state is not None:
         trainer.optimizer.load_state_dict(resumed_state.optimizer_state)
@@ -282,6 +311,7 @@ def main() -> None:
             evaluation_interval=args.evaluation_interval,
             evaluation_games=args.evaluation_games,
         ),
+        SelfPlayConfig(temperature_moves=args.temperature_moves),
         **pipeline_kwargs,
     )
     logger = RunLogger(

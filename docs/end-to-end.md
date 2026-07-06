@@ -64,13 +64,16 @@ Pass `--training-state` to give the training state a run-specific path.
 python -m gomoku_muzero.train \
   --board-size 10 \
   --win-length 5 \
-  --iterations 200 \
+  --iterations 500 \
   --simulations 100 \
   --games-per-iteration 10 \
   --training-steps 50 \
   --batch-size 64 \
   --unroll-steps 5 \
   --learning-rate 0.0003 \
+  --value-loss-weight 2.0 \
+  --temperature-moves 16 \
+  --dirichlet-alpha 0.15 \
   --replay-capacity 2000 \
   --replay-sampling recent \
   --replay-half-life 200 \
@@ -85,6 +88,9 @@ python -m gomoku_muzero.train \
   --tensorboard \
   --seed 0
 ```
+
+See [training.md](training.md) for what the exploration and value-weight
+settings do and which metric confirms they are working.
 
 Run names cannot overwrite existing run directories. Choose a new name when
 repeating an experiment, such as `baseline-10x10-seed1`.
