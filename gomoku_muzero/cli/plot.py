@@ -60,7 +60,7 @@ def create_plots(run_dir: str | Path) -> list[Path]:
             plt,
             steps,
             rows,
-            ("evaluation_score",),
+            ("evaluation_score", "heuristic_evaluation_score"),
             "Evaluation",
             output_dir / "evaluation.png",
         )

@@ -63,6 +63,7 @@ def play_self_play_game(
                 )
             ),
             reuse_root=reuse_root,
+            env=env,
         )
         policies.append(mcts.policy_target(root))
         root_values.append(root.value)

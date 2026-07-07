@@ -90,6 +90,7 @@ def play_human_game(
                 env.legal_actions(),
                 env.current_player,
                 add_exploration_noise=False,
+                env=env,
             )
             action = mcts.select_action(root, temperature=0)
             row, column = divmod(action, env.board_size)

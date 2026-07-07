@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from gomoku_muzero.game.env import GomokuEnv
 from gomoku_muzero.model.networks import MuZeroNetwork
 
 
@@ -56,7 +57,9 @@ class Node:
     the predicted reward for the parent player after entering this node.
     ``value_sum`` stores values from this node's player-to-move perspective.
     ``predicted_value`` caches the network value produced when the node was
-    expanded so revisits never repeat inference.
+    expanded so revisits never repeat inference. ``terminal`` marks nodes
+    whose incoming move provably ended the real game; their reward is exact
+    (1.0 win, 0.0 draw), their value is zero, and they are never expanded.
     """
 
     prior: float
@@ -64,6 +67,7 @@ class Node:
     reward: float = 0.0
     hidden_state: Tensor | None = None
     predicted_value: float = 0.0
+    terminal: bool = False
     visit_count: int = 0
     value_sum: float = 0.0
     children: dict[int, Node] = field(default_factory=dict)
@@ -105,6 +109,7 @@ class MCTS:
         add_exploration_noise: bool = False,
         progress_callback: Callable[[int, int], None] | None = None,
         reuse_root: Node | None = None,
+        env: GomokuEnv | None = None,
     ) -> Node:
         """Build and return a search tree rooted at a real observation.
 
@@ -117,6 +122,13 @@ class MCTS:
         the representation function. ``num_simulations`` then acts as a
         target for the root's total visit count: only the missing
         simulations are run (always at least one).
+
+        ``env`` optionally provides the real environment matching the root
+        observation. When present, the search replays each simulation's
+        action path on a clone and pins provably terminal moves to their
+        exact reward instead of trusting the learned model — a deliberate
+        known-rules extension of MuZero, like the in-tree legality
+        tracking. The caller's environment is never mutated.
         """
         legal_actions = self._validate_legal_actions(legal_actions)
         if to_play not in (-1, 1):
@@ -168,36 +180,50 @@ class MCTS:
                 if node.hidden_state is None:
                     break
 
-            if node.hidden_state is not None:
+            if node.terminal:
+                # Provably finished: exact reward is pinned, value is zero.
+                leaf_value = 0.0
+            elif node.hidden_state is not None:
                 # Root without children, or a revisited leaf whose expansion
                 # produced no children: reuse the cached network value
                 # instead of repeating inference.
                 leaf_value = node.predicted_value
             else:
-                parent = search_path[-2]
-                action = action_path[-1]
-                action_tensor = torch.tensor(
-                    [action],
-                    dtype=torch.long,
-                    device=parent.hidden_state.device,
+                terminal_reward = (
+                    self._terminal_reward(env, action_path)
+                    if env is not None
+                    else None
                 )
-                with torch.inference_mode():
-                    recurrent = self.network.recurrent_inference(
-                        parent.hidden_state, action_tensor
+                if terminal_reward is not None:
+                    node.terminal = True
+                    node.reward = terminal_reward
+                    node.predicted_value = 0.0
+                    leaf_value = 0.0
+                else:
+                    parent = search_path[-2]
+                    action = action_path[-1]
+                    action_tensor = torch.tensor(
+                        [action],
+                        dtype=torch.long,
+                        device=parent.hidden_state.device,
                     )
+                    with torch.inference_mode():
+                        recurrent = self.network.recurrent_inference(
+                            parent.hidden_state, action_tensor
+                        )
 
-                node.hidden_state = recurrent.hidden_state.detach()
-                node.reward = float(recurrent.reward.item())
-                node.predicted_value = float(recurrent.value.item())
-                remaining_actions = [
-                    candidate
-                    for candidate in parent.children
-                    if candidate != action
-                ]
-                self._expand(
-                    node, remaining_actions, recurrent.policy_logits[0]
-                )
-                leaf_value = node.predicted_value
+                    node.hidden_state = recurrent.hidden_state.detach()
+                    node.reward = float(recurrent.reward.item())
+                    node.predicted_value = float(recurrent.value.item())
+                    remaining_actions = [
+                        candidate
+                        for candidate in parent.children
+                        if candidate != action
+                    ]
+                    self._expand(
+                        node, remaining_actions, recurrent.policy_logits[0]
+                    )
+                    leaf_value = node.predicted_value
 
             self.backup(search_path, leaf_value, min_max_stats)
             if progress_callback is not None and (
@@ -326,6 +352,28 @@ class MCTS:
             child.prior = (
                 (1 - fraction) * child.prior + fraction * float(sample)
             )
+
+    @staticmethod
+    def _terminal_reward(
+        env: GomokuEnv, action_path: Sequence[int]
+    ) -> float | None:
+        """Replay a simulation's actions and return the exact final reward.
+
+        Returns the environment reward (1.0 win, 0.0 draw, both from the
+        acting player's perspective) when the path's last action ends the
+        real game, and ``None`` when the game continues. A stale path that
+        terminates early — possible only if a caller mixes searches with
+        and without ``env`` on one reused tree — falls back to ``None``,
+        i.e. to the learned model.
+        """
+        simulation = env.clone()
+        for index, action in enumerate(action_path):
+            _, reward, terminated, _ = simulation.step(action)
+            if terminated:
+                if index == len(action_path) - 1:
+                    return float(reward)
+                return None
+        return None
 
     def _expand(
         self, node: Node, legal_actions: Sequence[int], policy_logits: Tensor

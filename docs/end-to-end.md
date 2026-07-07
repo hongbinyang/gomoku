@@ -133,7 +133,9 @@ Useful signals include:
 - games and optimizer steps per second;
 - replay sample age;
 - actor queue size and policy lag;
-- evaluation score;
+- evaluation scores: `evaluation_score` (vs. random, saturates early) and
+  `heuristic_evaluation_score` (vs. win-or-block, the real strength
+  signal);
 - CUDA or MPS memory use when available.
 
 Stop TensorBoard with `Ctrl-C`; this does not stop training.

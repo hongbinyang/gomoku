@@ -192,6 +192,10 @@ iteration=5 games=2 loss=3.104 policy=2.410 entropy=1.900 kl=0.510 value=0.520 r
   positions beyond terminal states trained toward zero.
 - `reward`: weighted reward mean squared error.
 - `eval`: wins, draws, and losses against random.
+- `heval`: wins, draws, and losses against the win-or-block heuristic —
+  an opponent that completes its own five or blocks yours before moving
+  randomly. Random evaluation saturates almost immediately; `heval` is
+  the score that measures tactical competence.
 
 Persisted metrics additionally include `policy_ce` (unweighted
 cross-entropy over searched positions, satisfying
@@ -283,8 +287,8 @@ blocking, and fewer immediate tactical mistakes.
 Long configurations can take many hours or days because MCTS inference is
 unbatched and the current asynchronous pipeline uses one self-play actor.
 Tree reuse between consecutive self-play moves reduces the simulations each
-move must run, but random-only evaluation, lack of best-checkpoint
-selection, and the single actor will eventually limit further improvement.
+move must run, but the lack of best-checkpoint selection and the single
+actor will eventually limit further improvement.
 
 See [Metrics and visualization](metrics.md) for persisted timing, throughput,
 policy lag, device memory, TensorBoard, and static plots.

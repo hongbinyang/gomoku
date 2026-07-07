@@ -61,6 +61,14 @@ statistics are kept, its hidden state is re-grounded on the real
 observation through `h`, and `num_simulations` becomes a target for the
 root's total visit count, so only the missing simulations run.
 
+When the caller provides the real environment, the search is
+terminal-aware: each simulation's action path is replayed on a clone, and
+a move that provably ends the game is pinned to its exact reward (win 1,
+draw 0) with value zero and no children. One-move wins and losses are
+therefore seen with certainty regardless of what the learned model
+believes. Like in-tree legality tracking, this is a deliberate known-rules
+extension of pure MuZero, which would rely on the dynamics network alone.
+
 ```bash
 python -m pytest tests/test_mcts.py
 ```

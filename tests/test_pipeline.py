@@ -47,3 +47,10 @@ def test_one_end_to_end_learning_iteration() -> None:
         + result.evaluation.losses
         == 2
     )
+    assert result.heuristic_evaluation is not None
+    assert (
+        result.heuristic_evaluation.wins
+        + result.heuristic_evaluation.draws
+        + result.heuristic_evaluation.losses
+        == 2
+    )

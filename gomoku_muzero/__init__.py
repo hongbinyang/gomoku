@@ -9,7 +9,11 @@ from gomoku_muzero.model.checkpoint import (
     save_training_state,
 )
 from gomoku_muzero.game.env import GomokuEnv
-from gomoku_muzero.workflows.evaluate import EvaluationResult, evaluate_against_random
+from gomoku_muzero.workflows.evaluate import (
+    EvaluationResult,
+    evaluate_against_heuristic,
+    evaluate_against_random,
+)
 from gomoku_muzero.search.mcts import MCTS, MCTSConfig, Node
 from gomoku_muzero.model.networks import MuZeroNetwork
 from gomoku_muzero.training.pipeline import LearningConfig, MuZeroPipeline
@@ -35,6 +39,7 @@ __all__ = [
     "ReplayBatch",
     "ReplayBuffer",
     "SelfPlayConfig",
+    "evaluate_against_heuristic",
     "evaluate_against_random",
     "load_checkpoint",
     "load_training_state",

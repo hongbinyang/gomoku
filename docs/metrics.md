@@ -73,7 +73,11 @@ Search quality:
 
 Evaluation and hardware:
 
-- evaluation wins, draws, losses, and score;
+- evaluation wins, draws, losses, and score against the random baseline
+  (`evaluation_*`, a saturating smoke test);
+- the same against the win-or-block heuristic
+  (`heuristic_evaluation_*`), which punishes threat-blind play and is
+  the informative strength signal;
 - CUDA or MPS allocated/reserved memory when exposed by PyTorch.
 
 ## TensorBoard

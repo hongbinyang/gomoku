@@ -3,11 +3,45 @@ import pytest
 import torch
 from torch import Tensor, nn
 
+from gomoku_muzero.game.env import GomokuEnv
 from gomoku_muzero.search.mcts import MCTS, MCTSConfig, Node
 from gomoku_muzero.model.networks import (
     InitialInferenceOutput,
     RecurrentInferenceOutput,
 )
+
+
+class UniformNetwork(nn.Module):
+    """Uninformed network: uniform policy, zero value and reward.
+
+    Any tactical behavior shown by a search using this network must come
+    from the search itself, not the learned model.
+    """
+
+    def __init__(self, board_size: int) -> None:
+        super().__init__()
+        self.board_size = board_size
+        self.action_space_size = board_size * board_size
+        self.anchor = nn.Parameter(torch.zeros(()))
+
+    def initial_inference(self, observation: Tensor) -> InitialInferenceOutput:
+        batch = observation.shape[0]
+        return InitialInferenceOutput(
+            torch.zeros(batch, 1, self.board_size, self.board_size),
+            torch.zeros(batch, self.action_space_size),
+            torch.zeros(batch, 1),
+        )
+
+    def recurrent_inference(
+        self, hidden_state: Tensor, action: Tensor
+    ) -> RecurrentInferenceOutput:
+        batch = action.shape[0]
+        return RecurrentInferenceOutput(
+            hidden_state,
+            torch.zeros(batch, 1),
+            torch.zeros(batch, self.action_space_size),
+            torch.zeros(batch, 1),
+        )
 
 
 class FakeNetwork(nn.Module):
@@ -186,6 +220,58 @@ def test_mismatched_subtree_is_not_reused() -> None:
 
     assert second_root is not first_root.children[3]
     assert second_root.visit_count == 4
+
+
+def test_search_pins_provable_wins_without_model_help() -> None:
+    """With the real env, an immediate win is found and pinned exactly."""
+    env = GomokuEnv(board_size=3, win_length=3)
+    for action in (0, 8, 1, 7):  # black holds 0, 1 and threatens 2
+        env.step(action)
+    search = MCTS(
+        UniformNetwork(3),  # type: ignore[arg-type]
+        MCTSConfig(num_simulations=40),
+        seed=0,
+    )
+
+    root = search.run(
+        env.observation(),
+        env.legal_actions(),
+        env.current_player,
+        env=env,
+    )
+
+    winning_child = root.children[2]
+    assert winning_child.terminal
+    assert winning_child.reward == 1.0
+    assert not winning_child.children
+    assert search.select_action(root, temperature=0) == 2
+
+
+def test_search_blocks_opponent_threat_without_model_help() -> None:
+    """The regression from human play: search must see the forced loss.
+
+    Black holds cells 0 and 1 and threatens to complete at 2; white is to
+    move. Every non-blocking white move loses immediately to black's
+    reply, which terminal-aware search proves with the real rules even
+    though the network is completely uninformed.
+    """
+    env = GomokuEnv(board_size=3, win_length=3)
+    for action in (0, 8, 1):  # black: 0, 1; white: 8; white to move
+        env.step(action)
+    search = MCTS(
+        UniformNetwork(3),  # type: ignore[arg-type]
+        MCTSConfig(num_simulations=60),
+        seed=0,
+    )
+
+    root = search.run(
+        env.observation(),
+        env.legal_actions(),
+        env.current_player,
+        env=env,
+    )
+
+    assert search.select_action(root, temperature=0) == 2
 
 
 def test_search_reports_simulation_progress() -> None:

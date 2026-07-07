@@ -113,6 +113,25 @@ class GomokuEnv:
         }
         return self.observation(), reward, self.terminated, info
 
+    def winning_actions(self, player: int) -> list[int]:
+        """Return every empty cell that would immediately win for ``player``.
+
+        Used by terminal-aware search and the heuristic evaluation
+        opponent. The board is restored before returning.
+        """
+        if player not in (self.BLACK, self.WHITE):
+            raise ValueError("player must be BLACK or WHITE")
+        if self.terminated:
+            return []
+        wins: list[int] = []
+        for action in np.flatnonzero(self.board.ravel() == self.EMPTY):
+            row, column = divmod(int(action), self.board_size)
+            self.board[row, column] = player
+            if self._is_winning_move(row, column):
+                wins.append(int(action))
+            self.board[row, column] = self.EMPTY
+        return wins
+
     def clone(self) -> GomokuEnv:
         """Return an independent copy, useful for tests and self-play."""
         copy = GomokuEnv(self.board_size, self.win_length)

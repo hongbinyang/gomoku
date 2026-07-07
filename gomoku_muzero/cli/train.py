@@ -370,6 +370,12 @@ def main() -> None:
                     f" eval={evaluation.wins}W/"
                     f"{evaluation.draws}D/{evaluation.losses}L"
                 )
+            if result.heuristic_evaluation is not None:
+                heuristic = result.heuristic_evaluation
+                message += (
+                    f" heval={heuristic.wins}W/"
+                    f"{heuristic.draws}D/{heuristic.losses}L"
+                )
             metrics = {
                 **(result.latest_metrics or {}),
                 **result.operational_metrics,
@@ -382,6 +388,23 @@ def main() -> None:
                         "evaluation_draws": result.evaluation.draws,
                         "evaluation_losses": result.evaluation.losses,
                         "evaluation_score": result.evaluation.score,
+                    }
+                )
+            if result.heuristic_evaluation is not None:
+                metrics.update(
+                    {
+                        "heuristic_evaluation_wins": (
+                            result.heuristic_evaluation.wins
+                        ),
+                        "heuristic_evaluation_draws": (
+                            result.heuristic_evaluation.draws
+                        ),
+                        "heuristic_evaluation_losses": (
+                            result.heuristic_evaluation.losses
+                        ),
+                        "heuristic_evaluation_score": (
+                            result.heuristic_evaluation.score
+                        ),
                     }
                 )
             logger.record("iteration", result.iteration, metrics)

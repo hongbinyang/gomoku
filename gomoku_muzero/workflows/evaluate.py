@@ -1,4 +1,4 @@
-"""Evaluate a MuZero agent against a fixed random-action baseline."""
+"""Evaluate a MuZero agent against fixed baseline opponents."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import numpy as np
 
 from gomoku_muzero.game.env import GomokuEnv
 from gomoku_muzero.search.mcts import MCTS
+
+OpponentFn = Callable[[GomokuEnv, np.random.Generator], int]
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,28 @@ class EvaluationResult:
         return (self.wins + 0.5 * self.draws) / total
 
 
+def random_action(env: GomokuEnv, rng: np.random.Generator) -> int:
+    """Play a uniformly random legal move."""
+    return int(rng.choice(env.legal_actions()))
+
+
+def heuristic_action(env: GomokuEnv, rng: np.random.Generator) -> int:
+    """Play with one-move tactical awareness.
+
+    Completes an immediate win when available, otherwise blocks the
+    opponent's immediate win, otherwise plays randomly. This is the
+    minimum opponent that punishes threat-blind play, which random
+    evaluation cannot detect.
+    """
+    own_wins = env.winning_actions(env.current_player)
+    if own_wins:
+        return int(rng.choice(own_wins))
+    opponent_wins = env.winning_actions(-env.current_player)
+    if opponent_wins:
+        return int(rng.choice(opponent_wins))
+    return int(rng.choice(env.legal_actions()))
+
+
 def evaluate_against_random(
     env: GomokuEnv,
     mcts: MCTS,
@@ -31,7 +55,33 @@ def evaluate_against_random(
     seed: int | None = None,
     progress_callback: Callable[[int, int, int, int], None] | None = None,
 ) -> EvaluationResult:
-    """Play greedily against random, alternating the agent's color."""
+    """Play greedily against random moves, alternating the agent's color."""
+    return _evaluate(
+        env, mcts, random_action, num_games, seed, progress_callback
+    )
+
+
+def evaluate_against_heuristic(
+    env: GomokuEnv,
+    mcts: MCTS,
+    num_games: int = 20,
+    seed: int | None = None,
+    progress_callback: Callable[[int, int, int, int], None] | None = None,
+) -> EvaluationResult:
+    """Play greedily against the win-or-block heuristic baseline."""
+    return _evaluate(
+        env, mcts, heuristic_action, num_games, seed, progress_callback
+    )
+
+
+def _evaluate(
+    env: GomokuEnv,
+    mcts: MCTS,
+    opponent: OpponentFn,
+    num_games: int,
+    seed: int | None,
+    progress_callback: Callable[[int, int, int, int], None] | None,
+) -> EvaluationResult:
     if num_games < 1:
         raise ValueError("num_games must be positive")
     rng = np.random.default_rng(seed)
@@ -47,6 +97,7 @@ def evaluate_against_random(
                     env.legal_actions(),
                     env.current_player,
                     add_exploration_noise=False,
+                    env=env,
                     progress_callback=(
                         None
                         if progress_callback is None
@@ -60,7 +111,7 @@ def evaluate_against_random(
                 )
                 action = mcts.select_action(root, temperature=0)
             else:
-                action = int(rng.choice(env.legal_actions()))
+                action = opponent(env, rng)
             env.step(action)
 
         if env.winner == env.EMPTY:

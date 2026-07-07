@@ -106,6 +106,23 @@ def test_terminal_move_still_advances_current_player() -> None:
     assert env.observation()[2].sum() == 0  # white shown as next to play
 
 
+def test_winning_actions_finds_completing_cells() -> None:
+    env = GomokuEnv(board_size=3, win_length=3)
+    play(env, [0, 8, 1])  # black holds 0, 1; white holds 8
+
+    assert env.winning_actions(env.BLACK) == [2]
+    assert env.winning_actions(env.WHITE) == []
+    # The probe restores the board.
+    assert env.board[0, 2] == env.EMPTY
+
+
+def test_winning_actions_empty_after_termination() -> None:
+    env = GomokuEnv(board_size=3, win_length=3)
+    play(env, [0, 8, 1, 7, 2])  # black completes the top row
+
+    assert env.winning_actions(env.WHITE) == []
+
+
 def test_clone_is_independent() -> None:
     env = GomokuEnv(board_size=5, win_length=5)
     env.step(0)

@@ -77,11 +77,15 @@ The networks follow the paper's board-game architecture at reduced scale:
 residual towers for representation and dynamics (default 4 blocks, 64
 channels) with per-sample min-max hidden-state scaling, and thin prediction
 heads. Search follows the paper's PUCT formulation (min-max Q normalization
-and the logarithmic exploration schedule) and reuses the played subtree
-between self-play moves. Training applies the paper's unroll stabilizers
-(hidden-state gradient halving, 1/K step weighting), supervises absorbing
-states beyond terminal positions, and augments replay samples with the
-board's eight dihedral symmetries by default.
+and the logarithmic exploration schedule), reuses the played subtree
+between self-play moves, and is terminal-aware: provably game-ending moves
+are pinned to their exact reward using the real rules, so one-move wins
+and losses are never missed. Training applies the paper's unroll
+stabilizers (hidden-state gradient halving, 1/K step weighting),
+supervises absorbing states beyond terminal positions, and augments replay
+samples with the board's eight dihedral symmetries by default. Periodic
+evaluation plays both a random baseline and a win-or-block heuristic; the
+latter is the meaningful strength signal.
 
 The implementation favors a clear core MuZero design and can be scaled by
 increasing board size, self-play data, network capacity, training work, and

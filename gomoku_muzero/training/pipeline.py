@@ -8,7 +8,11 @@ from statistics import fmean
 from time import perf_counter
 
 from gomoku_muzero.game.env import GomokuEnv
-from gomoku_muzero.workflows.evaluate import EvaluationResult, evaluate_against_random
+from gomoku_muzero.workflows.evaluate import (
+    EvaluationResult,
+    evaluate_against_heuristic,
+    evaluate_against_random,
+)
 from gomoku_muzero.search.mcts import MCTS
 from gomoku_muzero.training.replay import GameHistory, ReplayBuffer
 from gomoku_muzero.workflows.self_play import SelfPlayConfig, play_self_play_game
@@ -31,6 +35,7 @@ class IterationResult:
     games_generated: int
     latest_metrics: dict[str, float] | None
     evaluation: EvaluationResult | None
+    heuristic_evaluation: EvaluationResult | None
     operational_metrics: dict[str, float]
 
 
@@ -82,7 +87,7 @@ class MuZeroPipeline:
         training_seconds = perf_counter() - phase_started
 
         phase_started = perf_counter()
-        evaluation = self._evaluate(iteration, report)
+        evaluation, heuristic_evaluation = self._evaluate(iteration, report)
         evaluation_seconds = perf_counter() - phase_started
         iteration_seconds = perf_counter() - iteration_started
         operational_metrics = {
@@ -109,6 +114,7 @@ class MuZeroPipeline:
             games_generated,
             averaged_metrics,
             evaluation,
+            heuristic_evaluation,
             operational_metrics,
         )
 
@@ -183,23 +189,39 @@ class MuZeroPipeline:
         self,
         iteration: int,
         report: Callable[[str], None],
-    ) -> EvaluationResult | None:
-        """Run periodic evaluation against the fixed baseline."""
-        evaluation = None
-        if iteration % self.config.evaluation_interval == 0:
-            evaluation = evaluate_against_random(
-                self.env,
-                self.mcts,
-                num_games=self.config.evaluation_games,
-                seed=iteration,
-                progress_callback=(
-                    lambda game, total_games, completed, total: report(
-                        f"iteration {iteration} | evaluation game "
-                        f"{game}/{total_games} | MCTS {completed}/{total}"
-                    )
-                ),
-            )
-        return evaluation
+    ) -> tuple[EvaluationResult | None, EvaluationResult | None]:
+        """Run periodic evaluation against both fixed baselines.
+
+        Random is a saturating smoke test; the win-or-block heuristic is
+        the informative opponent because it punishes threat-blind play.
+        """
+        if iteration % self.config.evaluation_interval != 0:
+            return None, None
+        evaluation = evaluate_against_random(
+            self.env,
+            self.mcts,
+            num_games=self.config.evaluation_games,
+            seed=iteration,
+            progress_callback=(
+                lambda game, total_games, completed, total: report(
+                    f"iteration {iteration} | evaluation (random) game "
+                    f"{game}/{total_games} | MCTS {completed}/{total}"
+                )
+            ),
+        )
+        heuristic_evaluation = evaluate_against_heuristic(
+            self.env,
+            self.mcts,
+            num_games=self.config.evaluation_games,
+            seed=iteration + 5_000,
+            progress_callback=(
+                lambda game, total_games, completed, total: report(
+                    f"iteration {iteration} | evaluation (heuristic) game "
+                    f"{game}/{total_games} | MCTS {completed}/{total}"
+                )
+            ),
+        )
+        return evaluation, heuristic_evaluation
 
     def run(
         self,
