@@ -360,6 +360,18 @@ def test_search_blocks_open_three_with_uninformed_network() -> None:
     assert search.select_action(root, temperature=0) in (10, 14)
 
 
+def test_proven_immediate_win_overrides_visit_counts() -> None:
+    search = make_search()
+    root = Node(prior=1.0, to_play=1)
+    root.children[4] = Node(prior=0.9, to_play=-1, visit_count=50)
+    root.children[7] = Node(
+        prior=0.1, to_play=-1, visit_count=2, terminal=True, reward=1.0
+    )
+
+    assert search.select_action(root, temperature=0) == 7
+    assert search.select_action(root, temperature=1.0) == 7
+
+
 def test_search_reports_simulation_progress() -> None:
     updates: list[tuple[int, int]] = []
 

@@ -87,9 +87,9 @@ trust the learned model: legal actions are tracked through the tree, and,
 when the caller passes the real environment, provably terminal moves are
 pinned to their exact reward (`Node.terminal`), one ply of static threat
 analysis proves immediate wins and unstoppable double threats
-(`Node.proven_value`) and forces the block of a lone threat, and a fixed
-fraction of prior mass is redistributed onto direct-threat cells
+(`Node.proven_value`) and forces the block of a lone threat, a fixed fraction of prior mass is
+redistributed onto immediate completions and direct-threat cells
 (`threat_prior_fraction`) so tactics get searched regardless of the
-learned policy.
+learned policy, and a proven immediate win at the root is always played.
 
 See [MuZero walkthrough](muzero-walkthrough.md) for the end-to-end data flow.

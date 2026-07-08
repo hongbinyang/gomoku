@@ -70,10 +70,12 @@ in-tree rewards are exactly zero; a player to move with an immediate
 completion is a proven win (+1) and a player facing two opponent
 completion cells is a proven loss (-1), both without expansion; a player
 facing exactly one opponent completion cell expands only the forced
-block; and a fixed fraction of prior mass (``threat_prior_fraction``) is
-redistributed over direct-threat cells for either side, so tactical lines
-are searched even when the learned policy underrates them — the search
-remains free to override the bias. Together these make one-move outcomes
+block; a fixed fraction of prior mass (``threat_prior_fraction``) is
+redistributed over immediate completions and direct-threat cells for
+either side, so tactical lines are searched even when the learned policy
+underrates them — the search remains free to override the bias; and a
+proven immediate win at the root is always played, overriding visit
+counts and sampling temperature. Together these make one-move outcomes
 certain and open-three/open-four traps refutable within roughly 100
 simulations at any training level. Like in-tree legality tracking, this
 is a deliberate known-rules extension of pure MuZero, which would rely on

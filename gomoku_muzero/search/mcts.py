@@ -311,6 +311,18 @@ class MCTS:
         if temperature < 0:
             raise ValueError("temperature must be non-negative")
 
+        # A proven immediate win can never be worse than any alternative,
+        # so it overrides both visit counts and sampling temperature. This
+        # removes the "won position but wanders" behavior that discount=1
+        # otherwise permits.
+        winning_actions = [
+            action
+            for action, child in root.children.items()
+            if child.terminal and child.reward == 1.0
+        ]
+        if winning_actions:
+            return min(winning_actions)
+
         actions = np.array(sorted(root.children), dtype=np.int64)
         visits = np.array(
             [root.children[int(action)].visit_count for action in actions],
@@ -421,17 +433,20 @@ class MCTS:
         return node.predicted_value
 
     def _tactical_cells(self, env: GomokuEnv) -> list[int]:
-        """Cells that create a direct threat for either player.
+        """Cells that win immediately or create a direct threat, either side.
 
-        For the player to move these are attacking continuations; for the
-        opponent they are the squares that must usually be denied. Both
-        deserve search attention even when the learned policy underrates
-        them.
+        Immediate completions are the most urgent tier — without boosting
+        them, the search may never visit its own winning move among many
+        legal actions. Threat-makers are attacking continuations for the
+        player to move and squares to deny for the opponent. All deserve
+        search attention even when the learned policy underrates them.
         """
         if self.config.threat_prior_fraction == 0:
             return []
         player = env.current_player
-        cells = set(env.threat_actions(player))
+        cells = set(env.winning_actions(player))
+        cells.update(env.winning_actions(-player))
+        cells.update(env.threat_actions(player))
         cells.update(env.threat_actions(-player))
         return sorted(cells)
 
