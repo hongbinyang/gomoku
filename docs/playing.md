@@ -29,7 +29,10 @@ python -m gomoku_muzero.play [OPTIONS]
 | `-h`, `--help` | | Print help and exit |
 
 Higher simulation counts generally improve search but make each response
-slower. Play uses greedy root selection without Dirichlet noise, so identical
+slower. Keep `--simulations` at 100 or above: the search's known-rules
+threat refutations (blocking open threes and fours) need roughly that
+budget to complete; below it the model may revert to threat-blind play.
+Play uses greedy root selection without Dirichlet noise, so identical
 weights and positions are deterministic.
 
 ## Examples

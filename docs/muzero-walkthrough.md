@@ -61,13 +61,23 @@ statistics are kept, its hidden state is re-grounded on the real
 observation through `h`, and `num_simulations` becomes a target for the
 root's total visit count, so only the missing simulations run.
 
-When the caller provides the real environment, the search is
-terminal-aware: each simulation's action path is replayed on a clone, and
-a move that provably ends the game is pinned to its exact reward (win 1,
-draw 0) with value zero and no children. One-move wins and losses are
-therefore seen with certainty regardless of what the learned model
-believes. Like in-tree legality tracking, this is a deliberate known-rules
-extension of pure MuZero, which would rely on the dynamics network alone.
+When the caller provides the real environment, the search applies a
+known-rules layer that never trusts the learned model where the rules can
+answer directly. Each simulation's action path is replayed on a clone,
+and then: moves that provably end the game are pinned to their exact
+reward (win 1, draw 0) with value zero and no children; non-terminal
+in-tree rewards are exactly zero; a player to move with an immediate
+completion is a proven win (+1) and a player facing two opponent
+completion cells is a proven loss (-1), both without expansion; a player
+facing exactly one opponent completion cell expands only the forced
+block; and a fixed fraction of prior mass (``threat_prior_fraction``) is
+redistributed over direct-threat cells for either side, so tactical lines
+are searched even when the learned policy underrates them — the search
+remains free to override the bias. Together these make one-move outcomes
+certain and open-three/open-four traps refutable within roughly 100
+simulations at any training level. Like in-tree legality tracking, this
+is a deliberate known-rules extension of pure MuZero, which would rely on
+the dynamics network alone.
 
 ```bash
 python -m pytest tests/test_mcts.py

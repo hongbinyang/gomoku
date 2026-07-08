@@ -123,6 +123,17 @@ def test_winning_actions_empty_after_termination() -> None:
     assert env.winning_actions(env.WHITE) == []
 
 
+def test_threat_actions_finds_four_makers() -> None:
+    env = GomokuEnv(board_size=10, win_length=5)
+    # black open three on row 1: (1,1), (1,2), (1,3)
+    for action in [11, 24, 12, 33, 13]:
+        env.step(action)
+
+    assert sorted(env.threat_actions(env.BLACK)) == [10, 14]
+    assert env.threat_actions(env.WHITE) == []
+    assert np.count_nonzero(env.board) == 5  # board restored
+
+
 def test_clone_is_independent() -> None:
     env = GomokuEnv(board_size=5, win_length=5)
     env.step(0)

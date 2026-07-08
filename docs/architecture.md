@@ -82,9 +82,14 @@ with the minimum and maximum observed inside the current search
 the parent visit count (`pb_c_init`, `pb_c_base`), following the MuZero
 paper.
 
-The search deliberately uses known game rules in two places where pure
-MuZero would trust the learned model: legal actions are tracked through
-the tree, and, when the caller passes the real environment, provably
-terminal moves are pinned to their exact reward (`Node.terminal`).
+The search deliberately uses known game rules where pure MuZero would
+trust the learned model: legal actions are tracked through the tree, and,
+when the caller passes the real environment, provably terminal moves are
+pinned to their exact reward (`Node.terminal`), one ply of static threat
+analysis proves immediate wins and unstoppable double threats
+(`Node.proven_value`) and forces the block of a lone threat, and a fixed
+fraction of prior mass is redistributed onto direct-threat cells
+(`threat_prior_fraction`) so tactics get searched regardless of the
+learned policy.
 
 See [MuZero walkthrough](muzero-walkthrough.md) for the end-to-end data flow.

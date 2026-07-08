@@ -132,6 +132,50 @@ class GomokuEnv:
             self.board[row, column] = self.EMPTY
         return wins
 
+    def threat_actions(self, player: int) -> list[int]:
+        """Return empty cells where ``player`` would create a direct threat.
+
+        A threat move extends a contiguous line to ``win_length - 1``
+        stones with at least one empty completion cell beyond an end —
+        e.g. making an (open or half-open) four in five-in-a-row. Gap
+        patterns are intentionally not detected; this is a cheap scan
+        used to focus search on tactically hot cells, not a solver. The
+        board is restored before returning.
+        """
+        if player not in (self.BLACK, self.WHITE):
+            raise ValueError("player must be BLACK or WHITE")
+        if self.terminated:
+            return []
+        threats: list[int] = []
+        directions = ((1, 0), (0, 1), (1, 1), (1, -1))
+        for action in np.flatnonzero(self.board.ravel() == self.EMPTY):
+            row, column = divmod(int(action), self.board_size)
+            self.board[row, column] = player
+            for row_delta, column_delta in directions:
+                forward = self._count_stones(
+                    row, column, row_delta, column_delta, player
+                )
+                backward = self._count_stones(
+                    row, column, -row_delta, -column_delta, player
+                )
+                if 1 + forward + backward != self.win_length - 1:
+                    continue
+                for sign, steps in ((1, forward), (-1, backward)):
+                    end_row = row + sign * row_delta * (steps + 1)
+                    end_column = column + sign * column_delta * (steps + 1)
+                    if (
+                        0 <= end_row < self.board_size
+                        and 0 <= end_column < self.board_size
+                        and self.board[end_row, end_column] == self.EMPTY
+                    ):
+                        threats.append(int(action))
+                        break
+                else:
+                    continue
+                break
+            self.board[row, column] = self.EMPTY
+        return threats
+
     def clone(self) -> GomokuEnv:
         """Return an independent copy, useful for tests and self-play."""
         copy = GomokuEnv(self.board_size, self.win_length)

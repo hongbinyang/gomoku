@@ -25,6 +25,11 @@ class MCTSConfig:
     discount: float = 1.0
     dirichlet_alpha: float = 0.3
     root_exploration_fraction: float = 0.25
+    # Fraction of prior mass redistributed uniformly over tactically hot
+    # cells (either side's direct-threat moves) when the real environment
+    # is available. Guarantees search attention on threats the learned
+    # policy underrates; 0 disables the bias.
+    threat_prior_fraction: float = 0.25
 
 
 class MinMaxStats:
@@ -60,6 +65,9 @@ class Node:
     expanded so revisits never repeat inference. ``terminal`` marks nodes
     whose incoming move provably ended the real game; their reward is exact
     (1.0 win, 0.0 draw), their value is zero, and they are never expanded.
+    ``proven_value`` marks nodes decided by static threat analysis (the
+    player to move either has an immediate win, +1, or faces an unstoppable
+    double threat, -1); they are also never expanded.
     """
 
     prior: float
@@ -68,6 +76,7 @@ class Node:
     hidden_state: Tensor | None = None
     predicted_value: float = 0.0
     terminal: bool = False
+    proven_value: float | None = None
     visit_count: int = 0
     value_sum: float = 0.0
     children: dict[int, Node] = field(default_factory=dict)
@@ -99,6 +108,8 @@ class MCTS:
             raise ValueError("pb_c_base must be positive")
         if not 0 <= self.config.discount <= 1:
             raise ValueError("discount must be in [0, 1]")
+        if not 0 <= self.config.threat_prior_fraction < 1:
+            raise ValueError("threat_prior_fraction must be in [0, 1)")
         self.rng = np.random.default_rng(seed)
 
     def run(
@@ -125,10 +136,14 @@ class MCTS:
 
         ``env`` optionally provides the real environment matching the root
         observation. When present, the search replays each simulation's
-        action path on a clone and pins provably terminal moves to their
-        exact reward instead of trusting the learned model — a deliberate
-        known-rules extension of MuZero, like the in-tree legality
-        tracking. The caller's environment is never mutated.
+        action path on a clone and applies known-rules reasoning instead of
+        trusting the learned model: terminal moves are pinned to their
+        exact reward, in-tree rewards of non-terminal moves are exactly
+        zero, and one ply of static threat analysis proves immediate wins
+        (+1), unstoppable double threats (-1), and restricts expansion to
+        the forced block when the opponent threatens exactly one cell.
+        Like in-tree legality tracking, this is a deliberate known-rules
+        extension of MuZero. The caller's environment is never mutated.
         """
         legal_actions = self._validate_legal_actions(legal_actions)
         if to_play not in (-1, 1):
@@ -157,7 +172,14 @@ class MCTS:
                 hidden_state=initial.hidden_state.detach(),
                 predicted_value=float(initial.value.item()),
             )
-            self._expand(root, legal_actions, initial.policy_logits[0])
+            self._expand(
+                root,
+                legal_actions,
+                initial.policy_logits[0],
+                boost_actions=(
+                    self._tactical_cells(env) if env is not None else ()
+                ),
+            )
         if add_exploration_noise:
             self.add_exploration_noise(root)
 
@@ -183,47 +205,17 @@ class MCTS:
             if node.terminal:
                 # Provably finished: exact reward is pinned, value is zero.
                 leaf_value = 0.0
+            elif node.proven_value is not None:
+                leaf_value = node.proven_value
             elif node.hidden_state is not None:
                 # Root without children, or a revisited leaf whose expansion
                 # produced no children: reuse the cached network value
                 # instead of repeating inference.
                 leaf_value = node.predicted_value
             else:
-                terminal_reward = (
-                    self._terminal_reward(env, action_path)
-                    if env is not None
-                    else None
+                leaf_value = self._expand_leaf(
+                    node, search_path[-2], action_path, env
                 )
-                if terminal_reward is not None:
-                    node.terminal = True
-                    node.reward = terminal_reward
-                    node.predicted_value = 0.0
-                    leaf_value = 0.0
-                else:
-                    parent = search_path[-2]
-                    action = action_path[-1]
-                    action_tensor = torch.tensor(
-                        [action],
-                        dtype=torch.long,
-                        device=parent.hidden_state.device,
-                    )
-                    with torch.inference_mode():
-                        recurrent = self.network.recurrent_inference(
-                            parent.hidden_state, action_tensor
-                        )
-
-                    node.hidden_state = recurrent.hidden_state.detach()
-                    node.reward = float(recurrent.reward.item())
-                    node.predicted_value = float(recurrent.value.item())
-                    remaining_actions = [
-                        candidate
-                        for candidate in parent.children
-                        if candidate != action
-                    ]
-                    self._expand(
-                        node, remaining_actions, recurrent.policy_logits[0]
-                    )
-                    leaf_value = node.predicted_value
 
             self.backup(search_path, leaf_value, min_max_stats)
             if progress_callback is not None and (
@@ -353,38 +345,140 @@ class MCTS:
                 (1 - fraction) * child.prior + fraction * float(sample)
             )
 
-    @staticmethod
-    def _terminal_reward(
-        env: GomokuEnv, action_path: Sequence[int]
-    ) -> float | None:
-        """Replay a simulation's actions and return the exact final reward.
+    def _expand_leaf(
+        self,
+        node: Node,
+        parent: Node,
+        action_path: Sequence[int],
+        env: GomokuEnv | None,
+    ) -> float:
+        """Evaluate a freshly reached leaf and expand it when appropriate.
 
-        Returns the environment reward (1.0 win, 0.0 draw, both from the
-        acting player's perspective) when the path's last action ends the
-        real game, and ``None`` when the game continues. A stale path that
-        terminates early — possible only if a caller mixes searches with
-        and without ``env`` on one reused tree — falls back to ``None``,
-        i.e. to the learned model.
+        With a real environment, known-rules reasoning runs first: exact
+        terminal rewards, static win/loss proofs, and forced-block
+        pruning. The network is consulted only for positions the rules
+        cannot decide.
+        """
+        action = action_path[-1]
+        simulation = self._replay(env, action_path) if env is not None else None
+        if simulation is not None and simulation.terminated:
+            node.terminal = True
+            node.reward = (
+                1.0 if simulation.winner != simulation.EMPTY else 0.0
+            )
+            node.predicted_value = 0.0
+            return 0.0
+
+        forced_block: int | None = None
+        if simulation is not None:
+            # One ply of static threat analysis with the real rules.
+            node.reward = 0.0  # non-terminal moves never carry reward
+            if simulation.winning_actions(simulation.current_player):
+                node.proven_value = 1.0
+                node.predicted_value = 1.0
+                return 1.0
+            opponent_wins = simulation.winning_actions(
+                -simulation.current_player
+            )
+            if len(opponent_wins) >= 2:
+                node.proven_value = -1.0
+                node.predicted_value = -1.0
+                return -1.0
+            if len(opponent_wins) == 1:
+                # Every other move loses to the opponent's completion.
+                forced_block = opponent_wins[0]
+
+        action_tensor = torch.tensor(
+            [action],
+            dtype=torch.long,
+            device=parent.hidden_state.device,
+        )
+        with torch.inference_mode():
+            recurrent = self.network.recurrent_inference(
+                parent.hidden_state, action_tensor
+            )
+        node.hidden_state = recurrent.hidden_state.detach()
+        node.predicted_value = float(recurrent.value.item())
+        boost_actions: Sequence[int] = ()
+        if simulation is None:
+            node.reward = float(recurrent.reward.item())
+            expand_actions: Sequence[int] = [
+                candidate
+                for candidate in parent.children
+                if candidate != action
+            ]
+        elif forced_block is not None:
+            expand_actions = [forced_block]
+        else:
+            expand_actions = simulation.legal_actions()
+            boost_actions = self._tactical_cells(simulation)
+        self._expand(
+            node,
+            expand_actions,
+            recurrent.policy_logits[0],
+            boost_actions=boost_actions,
+        )
+        return node.predicted_value
+
+    def _tactical_cells(self, env: GomokuEnv) -> list[int]:
+        """Cells that create a direct threat for either player.
+
+        For the player to move these are attacking continuations; for the
+        opponent they are the squares that must usually be denied. Both
+        deserve search attention even when the learned policy underrates
+        them.
+        """
+        if self.config.threat_prior_fraction == 0:
+            return []
+        player = env.current_player
+        cells = set(env.threat_actions(player))
+        cells.update(env.threat_actions(-player))
+        return sorted(cells)
+
+    @staticmethod
+    def _replay(
+        env: GomokuEnv, action_path: Sequence[int]
+    ) -> GomokuEnv | None:
+        """Replay a simulation's actions on a clone of the real game.
+
+        Returns the resulting environment, or ``None`` for a stale path
+        that terminates before its last action — possible only if a caller
+        mixes searches with and without ``env`` on one reused tree — in
+        which case the caller falls back to the learned model.
         """
         simulation = env.clone()
         for index, action in enumerate(action_path):
-            _, reward, terminated, _ = simulation.step(action)
-            if terminated:
-                if index == len(action_path) - 1:
-                    return float(reward)
+            _, _, terminated, _ = simulation.step(action)
+            if terminated and index < len(action_path) - 1:
                 return None
-        return None
+        return simulation
 
     def _expand(
-        self, node: Node, legal_actions: Sequence[int], policy_logits: Tensor
+        self,
+        node: Node,
+        legal_actions: Sequence[int],
+        policy_logits: Tensor,
+        boost_actions: Sequence[int] = (),
     ) -> None:
         if not legal_actions:
             return
         action_tensor = torch.tensor(
             legal_actions, dtype=torch.long, device=policy_logits.device
         )
-        priors = torch.softmax(policy_logits[action_tensor], dim=0)
-        for action, prior in zip(legal_actions, priors.tolist()):
+        priors = torch.softmax(policy_logits[action_tensor], dim=0).tolist()
+        boost = set(boost_actions) & set(legal_actions)
+        if boost:
+            # Redistribute a fixed fraction of prior mass uniformly over
+            # tactically hot cells so threats are searched even when the
+            # learned policy assigns them negligible probability.
+            fraction = self.config.threat_prior_fraction
+            share = fraction / len(boost)
+            priors = [
+                (1 - fraction) * prior
+                + (share if action in boost else 0.0)
+                for action, prior in zip(legal_actions, priors)
+            ]
+        for action, prior in zip(legal_actions, priors):
             node.children[action] = Node(
                 prior=prior,
                 to_play=-node.to_play,

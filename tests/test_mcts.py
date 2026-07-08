@@ -274,6 +274,92 @@ def test_search_blocks_opponent_threat_without_model_help() -> None:
     assert search.select_action(root, temperature=0) == 2
 
 
+def test_search_blocks_single_threat_via_forced_move_pruning() -> None:
+    """White must block black's lone completion cell; rules prove it."""
+    env = GomokuEnv(board_size=5, win_length=3)
+    # black: (2,1), (2,2); white: (2,0). White to move; black's only
+    # completion is (2,3), so every other white move is a proven loss.
+    for action in (11, 10, 12):
+        env.step(action)
+    assert env.current_player == env.WHITE
+    assert env.winning_actions(env.BLACK) == [13]
+    assert env.winning_actions(env.WHITE) == []
+    search = MCTS(
+        UniformNetwork(5),  # type: ignore[arg-type]
+        MCTSConfig(num_simulations=60),
+        seed=0,
+    )
+
+    root = search.run(
+        env.observation(),
+        env.legal_actions(),
+        env.current_player,
+        env=env,
+    )
+
+    assert search.select_action(root, temperature=0) == 13
+
+
+def test_double_threat_is_proven_lost() -> None:
+    """A node facing two opponent winning cells is decided statically."""
+    env = GomokuEnv(board_size=5, win_length=3)
+    # black: (2,1), (2,2) with both ends open -> threats at (2,0), (2,3).
+    # White to move cannot cover both: every reply is a proven loss.
+    for action in (11, 0, 12):
+        env.step(action)
+    assert env.current_player == env.WHITE
+    assert sorted(env.winning_actions(env.BLACK)) == [10, 13]
+    search = MCTS(
+        UniformNetwork(5),  # type: ignore[arg-type]
+        MCTSConfig(num_simulations=30),
+        seed=0,
+    )
+
+    root = search.run(
+        env.observation(),
+        env.legal_actions(),
+        env.current_player,
+        env=env,
+    )
+
+    visited = [
+        child
+        for child in root.children.values()
+        if child.visit_count > 0
+    ]
+    assert visited
+    # Even blocking one cell loses to the other, so every visited child
+    # is a proven win for black (the child node's player to move).
+    assert all(child.proven_value == 1.0 for child in visited)
+    assert all(not child.children for child in visited)
+
+
+def test_search_blocks_open_three_with_uninformed_network() -> None:
+    """The human-game regression: an open three must be answered.
+
+    Refuting a non-blocking move needs the opponent's extension tried in
+    the subtree; threat-prior boosting supplies it even when the policy
+    is uniform, and static double-threat analysis then proves the loss.
+    """
+    env = GomokuEnv(board_size=10, win_length=5)
+    for action in (11, 24, 12, 33, 13):  # black open three, white to move
+        env.step(action)
+    search = MCTS(
+        UniformNetwork(10),  # type: ignore[arg-type]
+        MCTSConfig(num_simulations=150),
+        seed=0,
+    )
+
+    root = search.run(
+        env.observation(),
+        env.legal_actions(),
+        env.current_player,
+        env=env,
+    )
+
+    assert search.select_action(root, temperature=0) in (10, 14)
+
+
 def test_search_reports_simulation_progress() -> None:
     updates: list[tuple[int, int]] = []
 
