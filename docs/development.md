@@ -41,6 +41,7 @@ Check both command interfaces:
 python -m gomoku_muzero.train --help
 python -m gomoku_muzero.play --help
 python -m gomoku_muzero.serve --help
+python -m gomoku_muzero.manager --help
 python -m gomoku_muzero.plot --help
 ```
 

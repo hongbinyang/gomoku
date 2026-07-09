@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gomoku MuZero — Console</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #2d2a26;
+    color: #e8e2d6;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 14px 28px;
+    background: #3a352f;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  }
+  header h1 { font-size: 18px; margin: 0; color: #f0e6d2; }
+  nav { display: flex; gap: 4px; }
+  nav a, nav span {
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    text-decoration: none;
+    color: #beb4a0;
+  }
+  nav a:hover { background: #4a4234; color: #e8e2d6; }
+  nav .active { background: #c98f45; color: #241d12; font-weight: 700; }
+  nav .soon { opacity: .45; cursor: default; }
+  main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    padding: 24px 28px;
+    align-items: flex-start;
+  }
+  .card {
+    background: #3a352f;
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.4);
+  }
+  .card h2 { margin: 0 0 14px; font-size: 15px; color: #f0e6d2; }
+  #statusCard { width: 460px; }
+  #optionsCard { flex: 1; min-width: 480px; max-width: 760px; }
+  .state {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .state.idle     { background: #57503f; }
+  .state.running  { background: #3f6d3f; }
+  .state.finished { background: #3d5a76; }
+  .state.failed   { background: #7a3b3b; }
+  #progressBar {
+    height: 10px;
+    background: #2d2a26;
+    border-radius: 5px;
+    margin: 12px 0 4px;
+    overflow: hidden;
+  }
+  #progressFill {
+    height: 100%;
+    width: 0;
+    background: #c98f45;
+    transition: width .6s;
+  }
+  .kv { display: grid; grid-template-columns: 170px 1fr; gap: 3px 10px;
+        font-size: 13px; margin-top: 10px; }
+  .kv span:nth-child(odd) { color: #7d7466; }
+  #logTail {
+    margin-top: 12px;
+    background: #201d1a;
+    border-radius: 6px;
+    padding: 10px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    max-height: 180px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #a99f8c;
+  }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; }
+  form h3 {
+    grid-column: 1 / -1;
+    margin: 12px 0 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #7d7466;
+    border-bottom: 1px solid #4a4234;
+    padding-bottom: 4px;
+  }
+  .field label { display: block; font-size: 12.5px; color: #beb4a0; margin-bottom: 3px; }
+  .field input, .field select {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid #57503f;
+    background: #2d2a26;
+    color: #e8e2d6;
+    font-size: 13.5px;
+  }
+  .field.checkbox { display: flex; align-items: center; gap: 8px; }
+  .field.checkbox input { width: auto; }
+  .field.checkbox label { margin: 0; }
+  .actions { grid-column: 1 / -1; display: flex; gap: 12px; margin-top: 16px; }
+  button {
+    padding: 10px 22px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  #startBtn { background: #c98f45; color: #241d12; }
+  #startBtn:hover:enabled { background: #e0b06a; }
+  #stopBtn { background: #7a3b3b; color: #f0e0e0; display: none; }
+  button:disabled { opacity: .45; cursor: default; }
+  #message { grid-column: 1 / -1; font-size: 13px; min-height: 18px; }
+  #message.error { color: #e08f8f; }
+  #message.ok { color: #8fd08f; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gomoku &middot; MuZero Console</h1>
+  <nav>
+    <span class="active">Train</span>
+    <a href="/play">Play</a>
+    <span class="soon" title="Coming in stage 2">Metrics</span>
+    <span class="soon" title="Coming in stage 2">Storage</span>
+  </nav>
+</header>
+<main>
+  <div class="card" id="statusCard">
+    <h2>Training status</h2>
+    <span class="state idle" id="stateBadge">idle</span>
+    <div id="progressBar"><div id="progressFill"></div></div>
+    <div id="progressText" style="font-size:13px;color:#beb4a0;"></div>
+    <div class="kv" id="statusDetails"></div>
+    <div id="logTail" hidden></div>
+  </div>
+  <div class="card" id="optionsCard">
+    <h2>Start a training run</h2>
+    <form id="optionsForm" autocomplete="off"></form>
+  </div>
+</main>
+
+<script>
+"use strict";
+const GROUPS = [
+  ["Run", ["run_name", "iterations", "resume", "seed"]],
+  ["Game", ["board_size", "win_length"]],
+  ["Network", ["hidden_channels", "res_blocks"]],
+  ["Search & self-play", ["simulations", "games_per_iteration",
+                          "temperature_moves", "self_play_mode"]],
+  ["Optimization", ["training_steps", "batch_size", "learning_rate",
+                    "value_loss_weight"]],
+  ["Replay", ["replay_capacity", "replay_sampling", "no_augment"]],
+  ["Evaluation & output", ["evaluation_interval", "evaluation_games",
+                           "checkpoint", "training_state", "device",
+                           "tensorboard"]],
+];
+let schema = [];
+let stateFiles = [];
+let running = false;
+
+const form = document.getElementById("optionsForm");
+
+async function api(path, body) {
+  const options = body
+    ? { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body) }
+    : {};
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "request failed");
+  return data;
+}
+
+function fieldFor(entry) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  if (entry.kind === "flag") {
+    wrap.classList.add("checkbox");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = entry.name;
+    if (entry.name === "tensorboard") input.checked = true;
+    const label = document.createElement("label");
+    label.htmlFor = entry.name;
+    label.textContent = entry.flag;
+    wrap.append(input, label);
+    return wrap;
+  }
+  const label = document.createElement("label");
+  label.htmlFor = entry.name;
+  label.textContent = entry.flag;
+  label.title = entry.help || "";
+  let input;
+  if (entry.name === "resume") {
+    input = document.createElement("select");
+    const none = document.createElement("option");
+    none.value = ""; none.textContent = "— fresh run —";
+    input.appendChild(none);
+    for (const name of stateFiles) {
+      const option = document.createElement("option");
+      option.value = "checkpoints/" + name;
+      option.textContent = name;
+      input.appendChild(option);
+    }
+  } else if (entry.choices) {
+    input = document.createElement("select");
+    for (const choice of entry.choices) {
+      const option = document.createElement("option");
+      option.value = option.textContent = choice;
+      if (choice === entry.default) option.selected = true;
+      input.appendChild(option);
+    }
+  } else {
+    input = document.createElement("input");
+    input.type = entry.kind === "str" ? "text" : "number";
+    if (entry.kind === "float") input.step = "any";
+    if (entry.default !== null && entry.default !== undefined) {
+      input.value = entry.default;
+    }
+    if (entry.name === "run_name") {
+      input.value = "";
+      input.placeholder = "auto: run-YYYYMMDD-HHMMSS";
+    }
+  }
+  input.id = entry.name;
+  input.title = entry.help || "";
+  wrap.append(label, input);
+  return wrap;
+}
+
+function buildForm() {
+  form.replaceChildren();
+  const byName = Object.fromEntries(schema.map(e => [e.name, e]));
+  for (const [title, names] of GROUPS) {
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    form.appendChild(heading);
+    for (const name of names) {
+      if (byName[name]) form.appendChild(fieldFor(byName[name]));
+    }
+  }
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.innerHTML =
+    '<button type="submit" id="startBtn">Start training</button>' +
+    '<button type="button" id="stopBtn">Stop (saves state)</button>';
+  form.appendChild(actions);
+  const message = document.createElement("div");
+  message.id = "message";
+  form.appendChild(message);
+  document.getElementById("stopBtn").addEventListener("click", stopRun);
+  form.addEventListener("submit", startRun);
+}
+
+function collectOptions() {
+  const options = {};
+  for (const entry of schema) {
+    const input = document.getElementById(entry.name);
+    if (!input) continue;
+    if (entry.kind === "flag") {
+      if (input.checked) options[entry.name] = true;
+    } else if (input.value !== "" && input.value !== null) {
+      options[entry.name] = input.value;
+    }
+  }
+  return options;
+}
+
+function say(text, cls) {
+  const message = document.getElementById("message");
+  message.textContent = text;
+  message.className = cls || "";
+}
+
+async function startRun(event) {
+  event.preventDefault();
+  try {
+    say("Starting…");
+    await api("/manager/api/start", { options: collectOptions() });
+    say("Training started.", "ok");
+    refreshStatus();
+  } catch (error) {
+    say("Error: " + error.message, "error");
+  }
+}
+
+async function stopRun() {
+  if (!confirm("Interrupt training? The state saved after the last "
+               + "completed iteration is kept, so you can resume."))
+    return;
+  try {
+    await api("/manager/api/stop", {});
+    say("Stop signal sent; the run will halt shortly.", "ok");
+  } catch (error) {
+    say("Error: " + error.message, "error");
+  }
+}
+
+function renderStatus(status) {
+  running = status.state === "running";
+  const badge = document.getElementById("stateBadge");
+  badge.textContent = status.state;
+  badge.className = "state " + status.state;
+  document.getElementById("startBtn").disabled = running;
+  document.getElementById("stopBtn").style.display =
+    running ? "inline-block" : "none";
+
+  const fill = document.getElementById("progressFill");
+  const progressText = document.getElementById("progressText");
+  if (status.iteration && status.target_iteration) {
+    const done = status.iteration - (status.first_iteration - 1);
+    const total = status.target_iteration - (status.first_iteration - 1);
+    fill.style.width = Math.min(100, 100 * done / total) + "%";
+    progressText.textContent =
+      `iteration ${status.iteration} of ${status.target_iteration}`
+      + (status.resumed_from ? " (resumed)" : "");
+  } else {
+    fill.style.width = "0";
+    progressText.textContent =
+      running ? "waiting for the first iteration…" : "";
+  }
+
+  const details = document.getElementById("statusDetails");
+  details.replaceChildren();
+  const rows = [];
+  if (status.run_name) rows.push(["run", status.run_name]);
+  if (status.latest_metrics) {
+    for (const [key, value] of Object.entries(status.latest_metrics)) {
+      rows.push([key, typeof value === "number" ? value.toFixed(3) : value]);
+    }
+  }
+  if (status.returncode !== null && status.returncode !== undefined) {
+    rows.push(["exit code", status.returncode]);
+  }
+  for (const [key, value] of rows) {
+    const k = document.createElement("span"); k.textContent = key;
+    const v = document.createElement("span"); v.textContent = value;
+    details.append(k, v);
+  }
+
+  const log = document.getElementById("logTail");
+  if (status.log_tail && status.log_tail.length) {
+    log.hidden = false;
+    log.textContent = status.log_tail.join("\n");
+    log.scrollTop = log.scrollHeight;
+  } else {
+    log.hidden = true;
+  }
+}
+
+async function refreshStatus() {
+  try {
+    renderStatus(await api("/manager/api/status"));
+  } catch (error) { /* transient; retried on the next poll */ }
+}
+
+async function boot() {
+  const [options, states] = await Promise.all([
+    api("/manager/api/options"),
+    api("/manager/api/states"),
+  ]);
+  schema = options.options;
+  stateFiles = states.states;
+  buildForm();
+  refreshStatus();
+  setInterval(refreshStatus, 3000);
+}
+boot();
+</script>
+</body>
+</html>

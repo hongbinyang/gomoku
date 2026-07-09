@@ -41,6 +41,13 @@ Training saves `checkpoints/latest.pt` (inference weights) and
 Resume an interrupted run with
 `python -m gomoku_muzero.train --resume checkpoints/training-state.pt`.
 
+Or manage everything — training lifecycle with live progress, and play —
+from the browser console:
+
+```bash
+python -m gomoku_muzero.manager
+```
+
 Play against a trained checkpoint in the browser (Go-style board, model
 and color selectable in the page):
 
@@ -64,6 +71,8 @@ Enter moves as zero-based coordinates such as `2 3`. Enter `q` to stop.
   direction, and state conventions.
 - [Training](docs/training.md): every training option, examples, progress,
   metrics, and convergence guidance.
+- [Management console](docs/manager.md): browser-based training
+  lifecycle, progress, and play.
 - [Playing](docs/playing.md): checkpoints, play options, and move input.
 - [MuZero walkthrough](docs/muzero-walkthrough.md): environment through the
   complete self-play and training loop.

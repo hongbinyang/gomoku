@@ -24,9 +24,14 @@ gomoku_muzero/
     train.py            # training command implementation
     play.py             # interactive game implementation
     serve.py            # web play command implementation
+    manager.py          # management console command implementation
   web/
     server.py           # dependency-free JSON API and game session
     static/index.html   # Go-style board frontend (single file)
+  manager/
+    server.py           # console routes layered over the play server
+    training.py         # training subprocess lifecycle and progress
+    static/console.html # management console frontend
   runtime/
     device.py           # CPU, CUDA, MPS, and TPU/XLA selection
     metrics.py          # JSONL/CSV and optional TensorBoard logging
@@ -46,6 +51,7 @@ gomoku_muzero/
 | Multi-component use cases | `workflows` | self-play, evaluation, tournaments |
 | User-facing commands | `cli` | arguments, terminal output, interactive input |
 | Browser play | `web` | HTTP API, game sessions, static frontend |
+| Console layer | `manager` | training subprocesses, status, run admin |
 | Runtime services | `runtime` | devices, accelerator synchronization, metrics |
 
 The intended dependency direction is:

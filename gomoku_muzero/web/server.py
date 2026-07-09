@@ -235,15 +235,20 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class GomokuWebServer(ThreadingHTTPServer):
-    """ThreadingHTTPServer carrying the game session and its lock."""
+    """ThreadingHTTPServer carrying the game session and its lock.
+
+    ``handler`` may pass a subclass of ``_Handler`` so higher layers (the
+    management console) can add routes while inheriting play behavior.
+    """
 
     def __init__(
         self,
         address: tuple[str, int],
         checkpoint_dir: str | Path,
         device: str | torch.device = "cpu",
+        handler: type[BaseHTTPRequestHandler] = None,  # type: ignore[assignment]
     ) -> None:
-        super().__init__(address, _Handler)
+        super().__init__(address, handler or _Handler)
         self.checkpoint_dir = Path(checkpoint_dir)
         self.device = device
         self.session: GameSession | None = None

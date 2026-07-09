@@ -28,7 +28,12 @@ from gomoku_muzero.training.trainer import LossWeights, MuZeroTrainer
 from gomoku_muzero.workflows.self_play import SelfPlayConfig
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the training argument parser.
+
+    Exposed separately so the management console can introspect the
+    available options without executing a training run.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--iterations",
@@ -184,6 +189,11 @@ def main() -> None:
         action="store_true",
         help="also write TensorBoard event files",
     )
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
 
     np.random.seed(args.seed)
