@@ -25,3 +25,6 @@ addopts = "-q"
 
 [tool.setuptools.packages.find]
 include = ["gomoku_muzero*"]
+
+[tool.setuptools.package-data]
+gomoku_muzero = ["web/static/*.html"]

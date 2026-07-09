@@ -41,7 +41,14 @@ Training saves `checkpoints/latest.pt` (inference weights) and
 Resume an interrupted run with
 `python -m gomoku_muzero.train --resume checkpoints/training-state.pt`.
 
-Play against a trained checkpoint:
+Play against a trained checkpoint in the browser (Go-style board, model
+and color selectable in the page):
+
+```bash
+python -m gomoku_muzero.serve
+```
+
+Or in the terminal:
 
 ```bash
 python -m gomoku_muzero.play \

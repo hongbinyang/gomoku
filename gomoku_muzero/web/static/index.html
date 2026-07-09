@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gomoku MuZero</title>
+<style>
+  :root {
+    --wood-light: #e0b06a;
+    --wood-dark: #c98f45;
+    --line: #4a3319;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 28px;
+    padding: 28px;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #2d2a26;
+    color: #e8e2d6;
+    flex-wrap: wrap;
+  }
+  #panel {
+    width: 260px;
+    background: #3a352f;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.4);
+  }
+  #panel h1 { font-size: 20px; margin: 0 0 16px; color: #f0e6d2; }
+  #panel label { display: block; font-size: 13px; margin: 12px 0 4px; color: #beb4a0; }
+  #panel select, #panel input {
+    width: 100%;
+    padding: 7px 8px;
+    border-radius: 6px;
+    border: 1px solid #57503f;
+    background: #2d2a26;
+    color: #e8e2d6;
+    font-size: 14px;
+  }
+  .color-row { display: flex; gap: 8px; margin-top: 4px; }
+  .color-row button {
+    flex: 1;
+    padding: 8px 0;
+    border-radius: 6px;
+    border: 1px solid #57503f;
+    background: #2d2a26;
+    color: #e8e2d6;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .color-row button.selected { border-color: #e0b06a; background: #4a4234; }
+  #newGame {
+    width: 100%;
+    margin-top: 18px;
+    padding: 10px 0;
+    border: none;
+    border-radius: 6px;
+    background: #c98f45;
+    color: #241d12;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  #newGame:hover { background: #e0b06a; }
+  #status {
+    margin-top: 16px;
+    padding: 10px;
+    border-radius: 6px;
+    background: #2d2a26;
+    font-size: 14px;
+    min-height: 40px;
+    line-height: 1.4;
+  }
+  #status.win  { color: #8fd08f; }
+  #status.loss { color: #e08f8f; }
+  #historyHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 18px;
+  }
+  #historyHead h2 { font-size: 14px; margin: 0; color: #beb4a0; }
+  #liveBtn {
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid #57503f;
+    background: #2d2a26;
+    color: #e8e2d6;
+    font-size: 12px;
+    cursor: pointer;
+    display: none;
+  }
+  #liveBtn.visible { display: inline-block; }
+  .numbers-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .numbers-row label { margin: 0; font-size: 13px; color: #beb4a0; }
+  .numbers-row input { width: auto; }
+  #history {
+    margin-top: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #2d2a26;
+    border-radius: 6px;
+    padding: 4px 0;
+    font-size: 13px;
+  }
+  #history:empty::after {
+    content: "No moves yet.";
+    display: block;
+    padding: 8px 10px;
+    color: #7d7466;
+  }
+  .move-entry {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+  }
+  .move-entry:hover { background: #3a352f; }
+  .move-entry.current { border-left-color: #e0b06a; background: #3a352f; }
+  .move-entry .num { color: #7d7466; width: 26px; text-align: right; }
+  .move-entry .who { margin-left: auto; color: #7d7466; font-size: 12px; }
+  #copyBtn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px 0;
+    border-radius: 6px;
+    border: 1px solid #57503f;
+    background: #2d2a26;
+    color: #beb4a0;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #copyBtn:hover:enabled { border-color: #e0b06a; color: #e8e2d6; }
+  #copyBtn:disabled { opacity: .4; cursor: default; }
+  #boardWrap { position: relative; }
+  svg { display: block; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  .hit { cursor: pointer; }
+  .thinking .hit { cursor: wait; }
+</style>
+</head>
+<body>
+  <div id="panel">
+    <h1>Gomoku &middot; MuZero</h1>
+    <label for="checkpoint">Model</label>
+    <select id="checkpoint"></select>
+    <label>Your color</label>
+    <div class="color-row">
+      <button id="pickBlack" class="selected" type="button">&#9679; Black (first)</button>
+      <button id="pickWhite" type="button">&#9675; White</button>
+    </div>
+    <label for="sims">MCTS simulations</label>
+    <input id="sims" type="number" min="50" max="1600" step="50" value="200">
+    <button id="newGame" type="button">New game</button>
+    <div id="status">Choose a model and start a game.</div>
+    <div id="historyHead">
+      <h2>Moves</h2>
+      <button id="liveBtn" type="button">&#9654; Live</button>
+    </div>
+    <div class="numbers-row">
+      <input id="showNumbers" type="checkbox">
+      <label for="showNumbers">Show move numbers on stones</label>
+    </div>
+    <div id="history"></div>
+    <button id="copyBtn" type="button" disabled>Copy game record</button>
+  </div>
+  <div id="boardWrap"></div>
+
+<script>
+"use strict";
+const CELL = 54, MARGIN = 42;
+let state = null;
+let humanColor = "black";
+let busy = false;
+let reviewIndex = null;  // null = live; otherwise index into state.moves
+
+const statusBox = document.getElementById("status");
+const boardWrap = document.getElementById("boardWrap");
+const historyBox = document.getElementById("history");
+const liveBtn = document.getElementById("liveBtn");
+
+function visibleMoves() {
+  if (!state || !state.moves) return [];
+  return reviewIndex === null
+    ? state.moves
+    : state.moves.slice(0, reviewIndex + 1);
+}
+
+function boardToDraw() {
+  const n = state.board_size;
+  if (reviewIndex === null) return state.board;
+  const board = Array.from({ length: n }, () => Array(n).fill(0));
+  for (const move of visibleMoves()) board[move.row][move.column] = move.player;
+  return board;
+}
+
+function setStatus(text, cls) {
+  statusBox.textContent = text;
+  statusBox.className = cls || "";
+}
+
+async function api(path, body) {
+  const options = body
+    ? { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body) }
+    : {};
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "request failed");
+  return data;
+}
+
+async function loadCheckpoints() {
+  const select = document.getElementById("checkpoint");
+  try {
+    const data = await api("/api/checkpoints");
+    select.innerHTML = "";
+    if (!data.checkpoints.length) {
+      setStatus("No checkpoints found. Train a model first.");
+      return;
+    }
+    for (const name of data.checkpoints) {
+      const option = document.createElement("option");
+      option.value = option.textContent = name;
+      select.appendChild(option);
+    }
+  } catch (error) {
+    setStatus("Failed to list checkpoints: " + error.message);
+  }
+}
+
+function stoneGradient(defs, id, light, mid, dark) {
+  const gradient = document.createElementNS(defs.namespaceURI, "radialGradient");
+  gradient.setAttribute("id", id);
+  gradient.setAttribute("cx", "35%"); gradient.setAttribute("cy", "30%");
+  for (const [offset, color] of [["0%", light], ["55%", mid], ["100%", dark]]) {
+    const stop = document.createElementNS(defs.namespaceURI, "stop");
+    stop.setAttribute("offset", offset);
+    stop.setAttribute("stop-color", color);
+    gradient.appendChild(stop);
+  }
+  defs.appendChild(gradient);
+}
+
+function starPoints(n) {
+  if (n < 7) return [];
+  const near = n >= 13 ? 3 : 2, center = (n - 1) / 2;
+  const anchors = [near, n - 1 - near];
+  const points = [];
+  for (const r of anchors) for (const c of anchors) points.push([r, c]);
+  if (n % 2 === 1) points.push([center, center]);
+  return points;
+}
+
+function renderBoard() {
+  const n = state ? state.board_size : 10;
+  const side = 2 * MARGIN + (n - 1) * CELL;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${side} ${side}`);
+  svg.setAttribute("width", Math.min(side, 640));
+  if (busy) svg.classList.add("thinking");
+
+  const defs = document.createElementNS(ns, "defs");
+  stoneGradient(defs, "blackStone", "#666", "#222", "#000");
+  stoneGradient(defs, "whiteStone", "#fff", "#eee", "#bbb");
+  const wood = document.createElementNS(ns, "linearGradient");
+  wood.setAttribute("id", "wood");
+  wood.setAttribute("x1", "0"); wood.setAttribute("y1", "0");
+  wood.setAttribute("x2", "1"); wood.setAttribute("y2", "1");
+  for (const [offset, color] of [["0%", "#e3b26e"], ["45%", "#d8a55c"],
+                                 ["70%", "#dcab63"], ["100%", "#c9924a"]]) {
+    const stop = document.createElementNS(ns, "stop");
+    stop.setAttribute("offset", offset);
+    stop.setAttribute("stop-color", color);
+    wood.appendChild(stop);
+  }
+  defs.appendChild(wood);
+  svg.appendChild(defs);
+
+  const back = document.createElementNS(ns, "rect");
+  back.setAttribute("width", side); back.setAttribute("height", side);
+  back.setAttribute("fill", "url(#wood)");
+  svg.appendChild(back);
+
+  for (let i = 0; i < n; i++) {
+    const p = MARGIN + i * CELL;
+    for (const [x1, y1, x2, y2] of [
+      [MARGIN, p, side - MARGIN, p], [p, MARGIN, p, side - MARGIN],
+    ]) {
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+      line.setAttribute("stroke", "#4a3319");
+      line.setAttribute("stroke-width", i === 0 || i === n - 1 ? 2.2 : 1.1);
+      svg.appendChild(line);
+    }
+  }
+  for (const [r, c] of starPoints(n)) {
+    const dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("cx", MARGIN + c * CELL);
+    dot.setAttribute("cy", MARGIN + r * CELL);
+    dot.setAttribute("r", 4.2);
+    dot.setAttribute("fill", "#4a3319");
+    svg.appendChild(dot);
+  }
+
+  const board = state ? boardToDraw() : null;
+  const shown = visibleMoves();
+  const showNumbers = document.getElementById("showNumbers").checked;
+  const numberAt = new Map();
+  if (showNumbers) {
+    for (const move of shown) {
+      numberAt.set(move.row * (state ? state.board_size : 10) + move.column,
+                   move.number);
+    }
+  }
+  let marked = new Set();
+  if (state) {
+    if (reviewIndex !== null && shown.length) {
+      const move = shown[shown.length - 1];
+      marked.add(move.row * state.board_size + move.column);
+    } else if (reviewIndex === null) {
+      if (state.last_ai_move !== null) marked.add(state.last_ai_move);
+      if (state.last_human_move !== null) marked.add(state.last_human_move);
+    }
+  }
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      const value = board ? board[r][c] : 0;
+      const cx = MARGIN + c * CELL, cy = MARGIN + r * CELL;
+      const action = r * n + c;
+      if (value !== 0) {
+        const shadow = document.createElementNS(ns, "circle");
+        shadow.setAttribute("cx", cx + 2); shadow.setAttribute("cy", cy + 3);
+        shadow.setAttribute("r", CELL * 0.46);
+        shadow.setAttribute("fill", "rgba(0,0,0,.35)");
+        svg.appendChild(shadow);
+        const stone = document.createElementNS(ns, "circle");
+        stone.setAttribute("cx", cx); stone.setAttribute("cy", cy);
+        stone.setAttribute("r", CELL * 0.46);
+        stone.setAttribute("fill",
+          value === 1 ? "url(#blackStone)" : "url(#whiteStone)");
+        svg.appendChild(stone);
+        if (numberAt.has(action)) {
+          const label = document.createElementNS(ns, "text");
+          label.setAttribute("x", cx); label.setAttribute("y", cy);
+          label.setAttribute("text-anchor", "middle");
+          label.setAttribute("dominant-baseline", "central");
+          label.setAttribute("font-size", CELL * 0.34);
+          label.setAttribute("font-family", "Arial, sans-serif");
+          label.setAttribute("fill", value === 1 ? "#ddd" : "#333");
+          label.textContent = numberAt.get(action);
+          svg.appendChild(label);
+        }
+        if (marked.has(action) && !showNumbers) {
+          const mark = document.createElementNS(ns, "circle");
+          mark.setAttribute("cx", cx); mark.setAttribute("cy", cy);
+          mark.setAttribute("r", CELL * 0.15);
+          mark.setAttribute("fill", "none");
+          mark.setAttribute("stroke", value === 1 ? "#e0b06a" : "#a3542c");
+          mark.setAttribute("stroke-width", 2.5);
+          svg.appendChild(mark);
+        }
+      } else if (state && !state.terminated && !busy
+                 && reviewIndex === null
+                 && state.to_play === state.human_player) {
+        const hit = document.createElementNS(ns, "circle");
+        hit.setAttribute("cx", cx); hit.setAttribute("cy", cy);
+        hit.setAttribute("r", CELL * 0.46);
+        hit.setAttribute("fill", "transparent");
+        hit.classList.add("hit");
+        hit.addEventListener("mouseenter", () => hit.setAttribute(
+          "fill", state.human_player === 1
+            ? "rgba(0,0,0,.35)" : "rgba(255,255,255,.5)"));
+        hit.addEventListener("mouseleave",
+          () => hit.setAttribute("fill", "transparent"));
+        hit.addEventListener("click", () => playMove(r, c));
+        svg.appendChild(hit);
+      }
+    }
+  }
+  boardWrap.replaceChildren(svg);
+}
+
+function renderHistory() {
+  historyBox.replaceChildren();
+  liveBtn.classList.toggle("visible", reviewIndex !== null);
+  document.getElementById("copyBtn").disabled =
+    !state || !state.moves || !state.moves.length;
+  if (!state || !state.moves) return;
+  state.moves.forEach((move, index) => {
+    const entry = document.createElement("div");
+    entry.className = "move-entry";
+    if (reviewIndex === index) entry.classList.add("current");
+    const num = document.createElement("span");
+    num.className = "num";
+    num.textContent = move.number + ".";
+    const stone = document.createElement("span");
+    stone.textContent = move.player === 1 ? "●" : "○";
+    const coordinate = document.createElement("span");
+    coordinate.textContent = `(${move.row}, ${move.column})`;
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = move.by === "human" ? "you" : "MuZero";
+    entry.append(num, stone, coordinate, who);
+    entry.addEventListener("click", () => {
+      reviewIndex = index === state.moves.length - 1 ? null : index;
+      renderHistory();
+      renderBoard();
+      if (reviewIndex !== null) {
+        setStatus(`Reviewing move ${move.number} of ${state.moves.length}. `
+          + "Click ▶ Live to continue playing.");
+      } else {
+        describe();
+      }
+    });
+    historyBox.appendChild(entry);
+  });
+  historyBox.scrollTop = reviewIndex === null
+    ? historyBox.scrollHeight
+    : historyBox.scrollTop;
+}
+
+function buildRecord() {
+  if (!state || !state.moves || !state.moves.length) return "";
+  const n = state.board_size;
+  const humanIsBlack = state.human_player === 1;
+  const black = humanIsBlack ? "Human" : `MuZero (${state.checkpoint})`;
+  const white = humanIsBlack ? `MuZero (${state.checkpoint})` : "Human";
+  let result = "unfinished";
+  if (state.terminated) {
+    result = state.winner === 0
+      ? "draw"
+      : `${state.winner === 1 ? "Black" : "White"} wins on move `
+        + state.moves.length;
+  }
+  const lines = [
+    `Gomoku ${n}x${n}, ${state.win_length} in a row`,
+    `Black (X): ${black}`,
+    `White (O): ${white}`,
+    `MCTS simulations: ${state.num_simulations}`,
+    `Result: ${result}`,
+    "",
+    "Moves as (row, column), zero-based from the top-left:",
+  ];
+  for (const move of state.moves) {
+    const stone = move.player === 1 ? "X" : "O";
+    const who = move.by === "human" ? "Human" : "MuZero";
+    lines.push(
+      `${String(move.number).padStart(3)}. ${stone} (${move.row}, `
+      + `${move.column})  ${who}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+async function copyRecord() {
+  const record = buildRecord();
+  if (!record) return;
+  const button = document.getElementById("copyBtn");
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(record);
+    } else {
+      const scratch = document.createElement("textarea");
+      scratch.value = record;
+      document.body.appendChild(scratch);
+      scratch.select();
+      document.execCommand("copy");
+      scratch.remove();
+    }
+    button.textContent = "Copied ✓";
+  } catch (error) {
+    button.textContent = "Copy failed";
+  }
+  setTimeout(() => { button.textContent = "Copy game record"; }, 1600);
+}
+
+function describe() {
+  if (!state) return;
+  if (state.terminated) {
+    if (state.winner === 0) setStatus("Draw.");
+    else if (state.winner === state.human_player)
+      setStatus("You win!", "win");
+    else setStatus("MuZero wins.", "loss");
+    return;
+  }
+  setStatus(state.to_play === state.human_player
+    ? "Your move." : "MuZero is thinking…");
+}
+
+async function newGame() {
+  const checkpoint = document.getElementById("checkpoint").value;
+  if (!checkpoint) { setStatus("No checkpoint selected."); return; }
+  const sims = Number(document.getElementById("sims").value) || 200;
+  busy = true;
+  setStatus(humanColor === "white"
+    ? "Starting… MuZero (black) moves first."
+    : "Starting new game…");
+  renderBoard();
+  try {
+    state = await api("/api/new", {
+      checkpoint: checkpoint,
+      human_color: humanColor,
+      num_simulations: sims,
+    });
+    busy = false;
+    reviewIndex = null;
+    describe();
+  } catch (error) {
+    busy = false;
+    setStatus("Error: " + error.message);
+  }
+  renderHistory();
+  renderBoard();
+}
+
+async function playMove(row, column) {
+  if (busy || !state || state.terminated) return;
+  busy = true;
+  state.board[row][column] = state.human_player;
+  setStatus("MuZero is thinking…");
+  renderBoard();
+  try {
+    state = await api("/api/move", { row: row, column: column });
+    reviewIndex = null;
+    describe();
+  } catch (error) {
+    setStatus("Error: " + error.message);
+  }
+  busy = false;
+  renderHistory();
+  renderBoard();
+}
+
+document.getElementById("pickBlack").addEventListener("click", () => {
+  humanColor = "black";
+  document.getElementById("pickBlack").classList.add("selected");
+  document.getElementById("pickWhite").classList.remove("selected");
+});
+document.getElementById("pickWhite").addEventListener("click", () => {
+  humanColor = "white";
+  document.getElementById("pickWhite").classList.add("selected");
+  document.getElementById("pickBlack").classList.remove("selected");
+});
+document.getElementById("newGame").addEventListener("click", newGame);
+liveBtn.addEventListener("click", () => {
+  reviewIndex = null;
+  renderHistory();
+  renderBoard();
+  describe();
+});
+document.getElementById("showNumbers")
+  .addEventListener("change", renderBoard);
+document.getElementById("copyBtn").addEventListener("click", copyRecord);
+
+loadCheckpoints();
+renderBoard();
+</script>
+</body>
+</html>

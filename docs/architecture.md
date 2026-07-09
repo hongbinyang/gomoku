@@ -23,11 +23,16 @@ gomoku_muzero/
   cli/
     train.py            # training command implementation
     play.py             # interactive game implementation
+    serve.py            # web play command implementation
+  web/
+    server.py           # dependency-free JSON API and game session
+    static/index.html   # Go-style board frontend (single file)
   runtime/
     device.py           # CPU, CUDA, MPS, and TPU/XLA selection
     metrics.py          # JSONL/CSV and optional TensorBoard logging
   train.py              # compatibility CLI entry point
   play.py               # compatibility CLI entry point
+  serve.py              # compatibility CLI entry point
 ```
 
 ## Where new code belongs
@@ -40,6 +45,7 @@ gomoku_muzero/
 | Learning mechanics | `training` | targets, replay sampling, losses, schedules |
 | Multi-component use cases | `workflows` | self-play, evaluation, tournaments |
 | User-facing commands | `cli` | arguments, terminal output, interactive input |
+| Browser play | `web` | HTTP API, game sessions, static frontend |
 | Runtime services | `runtime` | devices, accelerator synchronization, metrics |
 
 The intended dependency direction is:
