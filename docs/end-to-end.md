@@ -3,6 +3,12 @@
 This guide covers one complete lifecycle: environment setup, validation,
 training, monitoring, visualization, playing, and cleanup.
 
+Every step below uses the command line; the entire lifecycle is also
+available from the browser via the
+[management console](manager.md) (`python -m gomoku_muzero.manager`),
+which drives these same commands with live progress, charts, model
+information, and guarded cleanup.
+
 ## 1. Set up the project
 
 From the repository directory:

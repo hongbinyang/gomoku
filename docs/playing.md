@@ -18,6 +18,9 @@ Start the local web server and open the printed address:
 python -m gomoku_muzero.serve
 ```
 
+The same page is available as the Play tab of the
+[management console](manager.md) (`python -m gomoku_muzero.manager`).
+
 The page renders a Go-style board (stones on intersections, wooden
 background, last-move markers). Pick a model from the dropdown — every
 `*.pt` file in the checkpoint directory except training states — choose
