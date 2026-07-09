@@ -32,7 +32,35 @@
   }
   nav a:hover { background: #4a4234; color: #e8e2d6; }
   nav .active { background: #c98f45; color: #241d12; font-weight: 700; }
-  nav .soon { opacity: .45; cursor: default; }
+  .tabpane[hidden] { display: none; }
+  .tabpane { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; width: 100%; }
+  table { border-collapse: collapse; font-size: 13px; width: 100%; }
+  th, td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid #4a4234; }
+  th { color: #7d7466; font-weight: 400; font-size: 12px; }
+  td button {
+    padding: 4px 10px; font-size: 12px; font-weight: 400;
+    background: #2d2a26; color: #beb4a0; border: 1px solid #57503f;
+  }
+  td button:hover { border-color: #e0b06a; color: #e8e2d6; }
+  td button.danger:hover { border-color: #e08f8f; color: #e08f8f; }
+  .chart { margin-bottom: 8px; }
+  .chart h4 { margin: 10px 0 4px; font-size: 12.5px; color: #beb4a0; font-weight: 400; }
+  .runpick { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; }
+  .runpick label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; margin: 6px 0; }
+  .legend span::before {
+    content: "—"; font-weight: 700; margin-right: 4px;
+  }
+  #infoBox { font-size: 13px; }
+  #infoBox .kv { margin-top: 4px; }
+  .confirm-inline { display: inline-flex; gap: 6px; align-items: center; }
+  .confirm-inline input {
+    padding: 4px 6px; font-size: 12px; width: 180px;
+    background: #201d1a; border: 1px solid #7a3b3b; border-radius: 4px;
+    color: #e8e2d6;
+  }
+  .toolrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  .plotimgs img { max-width: 100%; border-radius: 6px; margin-top: 10px; }
   main {
     display: flex;
     flex-wrap: wrap;
@@ -136,24 +164,65 @@
 <header>
   <h1>Gomoku &middot; MuZero Console</h1>
   <nav>
-    <span class="active">Train</span>
+    <a href="#" class="tab active" data-tab="train">Train</a>
+    <a href="#" class="tab" data-tab="metrics">Metrics</a>
+    <a href="#" class="tab" data-tab="storage">Storage</a>
     <a href="/play">Play</a>
-    <span class="soon" title="Coming in stage 2">Metrics</span>
-    <span class="soon" title="Coming in stage 2">Storage</span>
   </nav>
 </header>
 <main>
-  <div class="card" id="statusCard">
-    <h2>Training status</h2>
-    <span class="state idle" id="stateBadge">idle</span>
-    <div id="progressBar"><div id="progressFill"></div></div>
-    <div id="progressText" style="font-size:13px;color:#beb4a0;"></div>
-    <div class="kv" id="statusDetails"></div>
-    <div id="logTail" hidden></div>
+  <div class="tabpane" id="tab-train">
+    <div class="card" id="statusCard">
+      <h2>Training status</h2>
+      <span class="state idle" id="stateBadge">idle</span>
+      <div id="progressBar"><div id="progressFill"></div></div>
+      <div id="progressText" style="font-size:13px;color:#beb4a0;"></div>
+      <div class="kv" id="statusDetails"></div>
+      <div id="logTail" hidden></div>
+    </div>
+    <div class="card" id="optionsCard">
+      <h2>Start a training run</h2>
+      <form id="optionsForm" autocomplete="off"></form>
+    </div>
   </div>
-  <div class="card" id="optionsCard">
-    <h2>Start a training run</h2>
-    <form id="optionsForm" autocomplete="off"></form>
+
+  <div class="tabpane" id="tab-metrics" hidden>
+    <div class="card" style="flex:1;min-width:560px;max-width:900px;">
+      <h2>Metrics</h2>
+      <div class="runpick" id="runPick"></div>
+      <div class="legend" id="chartLegend"></div>
+      <div id="charts"></div>
+    </div>
+    <div class="card" style="width:320px;">
+      <h2>External tools</h2>
+      <div class="toolrow" id="tbRow">
+        <span>TensorBoard:</span>
+        <span id="tbState">…</span>
+        <button id="tbBtn" type="button">Start</button>
+        <a id="tbLink" href="#" target="_blank" hidden>open</a>
+      </div>
+      <div class="toolrow" style="margin-top:14px;">
+        <span>Static plots:</span>
+        <select id="plotRun" style="max-width:150px;"></select>
+        <button id="plotBtn" type="button">Generate</button>
+      </div>
+      <div id="toolMsg" style="font-size:12.5px;color:#e08f8f;margin-top:8px;"></div>
+      <div class="plotimgs" id="plotImgs"></div>
+    </div>
+  </div>
+
+  <div class="tabpane" id="tab-storage" hidden>
+    <div class="card" style="flex:1;min-width:520px;max-width:760px;">
+      <h2>Runs</h2>
+      <table id="runsTable"></table>
+      <h2 style="margin-top:22px;">Checkpoints</h2>
+      <table id="ckptTable"></table>
+      <div id="storageMsg" style="font-size:13px;margin-top:10px;"></div>
+    </div>
+    <div class="card" style="width:380px;" id="infoCard" hidden>
+      <h2>Model information</h2>
+      <div id="infoBox"></div>
+    </div>
   </div>
 </main>
 
@@ -370,6 +439,324 @@ async function refreshStatus() {
   try {
     renderStatus(await api("/manager/api/status"));
   } catch (error) { /* transient; retried on the next poll */ }
+}
+
+/* ---------- Metrics tab ---------- */
+const PALETTE = ["#e0b06a", "#8fd08f", "#7fb3d5", "#e08f8f", "#c39bd3"];
+let selectedRuns = [];
+
+function fmt(value) {
+  return Math.abs(value) >= 100 ? value.toFixed(0)
+    : Math.abs(value) >= 1 ? value.toFixed(2) : value.toFixed(3);
+}
+
+function drawChart(title, byRun) {
+  const W = 560, H = 150, L = 46, R = 8, T = 8, B = 18;
+  let xs = [], ys = [];
+  for (const points of Object.values(byRun)) {
+    for (const [x, y] of points) { xs.push(x); ys.push(y); }
+  }
+  if (!xs.length) return "";
+  const xmin = Math.min(...xs), xmax = Math.max(...xs);
+  let ymin = Math.min(...ys), ymax = Math.max(...ys);
+  if (ymin === ymax) { ymin -= 1; ymax += 1; }
+  const sx = x => L + (x - xmin) / (xmax - xmin || 1) * (W - L - R);
+  const sy = y => T + (ymax - y) / (ymax - ymin) * (H - T - B);
+  let body = `<rect width="${W}" height="${H}" fill="#201d1a" rx="6"/>`;
+  for (const frac of [0, .5, 1]) {
+    const y = T + frac * (H - T - B);
+    body += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}"
+      stroke="#3a352f"/>`;
+  }
+  body += `<text x="${L - 6}" y="${T + 10}" text-anchor="end"
+    fill="#7d7466" font-size="10">${fmt(ymax)}</text>`;
+  body += `<text x="${L - 6}" y="${H - B}" text-anchor="end"
+    fill="#7d7466" font-size="10">${fmt(ymin)}</text>`;
+  body += `<text x="${L}" y="${H - 4}" fill="#7d7466"
+    font-size="10">${xmin}</text>`;
+  body += `<text x="${W - R}" y="${H - 4}" text-anchor="end"
+    fill="#7d7466" font-size="10">${xmax}</text>`;
+  selectedRuns.forEach((run, index) => {
+    const points = byRun[run];
+    if (!points) return;
+    const path = points.map(
+      ([x, y], i) => (i ? "L" : "M") + sx(x).toFixed(1) + " "
+        + sy(y).toFixed(1)
+    ).join("");
+    body += `<path d="${path}" fill="none"
+      stroke="${PALETTE[index % PALETTE.length]}" stroke-width="1.6"/>`;
+  });
+  return `<div class="chart"><h4>${title}</h4>
+    <svg viewBox="0 0 ${W} ${H}" width="100%">${body}</svg></div>`;
+}
+
+async function refreshCharts() {
+  if (!selectedRuns.length) {
+    document.getElementById("charts").innerHTML =
+      '<p style="color:#7d7466;font-size:13px;">Select runs above.</p>';
+    document.getElementById("chartLegend").replaceChildren();
+    return;
+  }
+  const data = await api(
+    "/manager/api/metrics?runs=" + selectedRuns.join(","));
+  const legend = document.getElementById("chartLegend");
+  legend.replaceChildren();
+  selectedRuns.forEach((run, index) => {
+    const item = document.createElement("span");
+    item.textContent = run;
+    item.style.color = PALETTE[index % PALETTE.length];
+    legend.appendChild(item);
+  });
+  document.getElementById("charts").innerHTML = data.keys
+    .map(key => drawChart(key, data.series[key] || {}))
+    .join("");
+}
+
+async function loadMetricsTab() {
+  const runs = (await api("/manager/api/runs")).runs;
+  const pick = document.getElementById("runPick");
+  pick.replaceChildren();
+  const plotSelect = document.getElementById("plotRun");
+  plotSelect.replaceChildren();
+  if (!selectedRuns.length && runs.length) selectedRuns = [runs[0].name];
+  for (const run of runs) {
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = selectedRuns.includes(run.name);
+    box.addEventListener("change", () => {
+      selectedRuns = box.checked
+        ? [...selectedRuns, run.name]
+        : selectedRuns.filter(name => name !== run.name);
+      refreshCharts();
+    });
+    label.append(box, document.createTextNode(
+      `${run.name} (${run.first_iteration}–${run.last_iteration})`));
+    pick.appendChild(label);
+    const option = document.createElement("option");
+    option.value = option.textContent = run.name;
+    plotSelect.appendChild(option);
+  }
+  refreshCharts();
+  refreshTensorBoard();
+}
+
+async function refreshTensorBoard() {
+  try {
+    const status = await api("/manager/api/tensorboard");
+    document.getElementById("tbState").textContent = !status.available
+      ? "not installed" : status.running ? "running" : "stopped";
+    const button = document.getElementById("tbBtn");
+    button.textContent = status.running ? "Stop" : "Start";
+    button.disabled = !status.available;
+    const link = document.getElementById("tbLink");
+    link.hidden = !status.running;
+    if (status.url) link.href = status.url;
+  } catch (error) { /* transient */ }
+}
+
+document.getElementById("tbBtn").addEventListener("click", async () => {
+  const running =
+    document.getElementById("tbBtn").textContent === "Stop";
+  try {
+    document.getElementById("toolMsg").textContent = "";
+    await api("/manager/api/tensorboard",
+              { action: running ? "stop" : "start" });
+  } catch (error) {
+    document.getElementById("toolMsg").textContent = error.message;
+  }
+  setTimeout(refreshTensorBoard, 500);
+});
+
+document.getElementById("plotBtn").addEventListener("click", async () => {
+  const run = document.getElementById("plotRun").value;
+  if (!run) return;
+  const images = document.getElementById("plotImgs");
+  document.getElementById("toolMsg").textContent = "";
+  images.replaceChildren();
+  try {
+    const result = await api("/manager/api/plots", { run: run });
+    for (const file of result.files) {
+      const img = document.createElement("img");
+      img.src = `/manager/plots/${run}/${file}?t=${Date.now()}`;
+      images.appendChild(img);
+    }
+  } catch (error) {
+    document.getElementById("toolMsg").textContent = error.message;
+  }
+});
+
+/* ---------- Storage tab ---------- */
+function storageSay(text, cls) {
+  const box = document.getElementById("storageMsg");
+  box.textContent = text;
+  box.style.color = cls === "error" ? "#e08f8f" : "#8fd08f";
+}
+
+function deleteCell(kind, name) {
+  const cell = document.createElement("td");
+  const button = document.createElement("button");
+  button.textContent = "Delete";
+  button.className = "danger";
+  button.addEventListener("click", () => {
+    const wrap = document.createElement("span");
+    wrap.className = "confirm-inline";
+    const input = document.createElement("input");
+    input.placeholder = `type "${name}" to confirm`;
+    const go = document.createElement("button");
+    go.textContent = "Confirm";
+    go.className = "danger";
+    go.addEventListener("click", async () => {
+      try {
+        await api("/manager/api/delete",
+                  { kind: kind, name: name, confirm: input.value });
+        storageSay(`Deleted ${name}.`);
+        loadStorageTab();
+      } catch (error) {
+        storageSay(error.message, "error");
+      }
+    });
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => loadStorageTab());
+    wrap.append(input, go, cancel);
+    cell.replaceChildren(wrap);
+    input.focus();
+  });
+  cell.appendChild(button);
+  return cell;
+}
+
+function rowOf(cells) {
+  const row = document.createElement("tr");
+  for (const cell of cells) {
+    if (cell instanceof HTMLElement) { row.appendChild(cell); continue; }
+    const td = document.createElement("td");
+    td.textContent = cell;
+    row.appendChild(td);
+  }
+  return row;
+}
+
+function headerOf(names) {
+  const row = document.createElement("tr");
+  for (const name of names) {
+    const th = document.createElement("th");
+    th.textContent = name;
+    row.appendChild(th);
+  }
+  return row;
+}
+
+async function showInfo(name) {
+  const card = document.getElementById("infoCard");
+  const box = document.getElementById("infoBox");
+  card.hidden = false;
+  box.textContent = "Loading…";
+  try {
+    const info = await api(
+      "/manager/api/model-info?name=" + encodeURIComponent(name));
+    box.replaceChildren();
+    const kv = document.createElement("div");
+    kv.className = "kv";
+    const pairs = [["name", info.name], ["kind", info.kind],
+      ["size", info.size_mb + " MB"]];
+    if (info.kind === "model") {
+      pairs.push(
+        ["board", `${info.board_size}x${info.board_size}, `
+                  + `win ${info.win_length}`],
+        ["network", `${info.hidden_channels} ch x `
+                    + `${info.num_blocks} blocks`],
+        ["parameters", info.parameters.toLocaleString()],
+        ["format", "v" + info.format_version]);
+      if (info.total_iterations) {
+        pairs.push(["iterations trained", info.total_iterations]);
+      }
+    }
+    for (const [key, value] of pairs) {
+      const k = document.createElement("span"); k.textContent = key;
+      const v = document.createElement("span"); v.textContent = value;
+      kv.append(k, v);
+    }
+    box.appendChild(kv);
+    if (info.note) {
+      const note = document.createElement("p");
+      note.textContent = info.note;
+      note.style.color = "#7d7466";
+      box.appendChild(note);
+    }
+    for (const entry of info.trained_by || []) {
+      const heading = document.createElement("h4");
+      heading.style.cssText =
+        "margin:14px 0 2px;font-size:12.5px;color:#beb4a0;";
+      heading.textContent = `run ${entry.run}`
+        + (entry.iterations
+           ? ` (iterations ${entry.iterations[0]}–${entry.iterations[1]})`
+           : "")
+        + (entry.resumed ? " — resumed" : "");
+      box.appendChild(heading);
+      const options = document.createElement("div");
+      options.className = "kv";
+      for (const [key, value] of Object.entries(entry.options || {})) {
+        const k = document.createElement("span"); k.textContent = key;
+        const v = document.createElement("span"); v.textContent = value;
+        options.append(k, v);
+      }
+      box.appendChild(options);
+    }
+  } catch (error) {
+    box.textContent = "Error: " + error.message;
+  }
+}
+
+async function loadStorageTab() {
+  const data = await api("/manager/api/storage");
+  const runsTable = document.getElementById("runsTable");
+  runsTable.replaceChildren(
+    headerOf(["run", "iterations", "size", "modified", ""]));
+  for (const run of data.runs) {
+    const iterations = run.first_iteration
+      ? `${run.first_iteration}–${run.last_iteration}` : "—";
+    runsTable.appendChild(rowOf([
+      run.name, iterations, run.size_mb + " MB",
+      new Date(run.modified * 1000).toLocaleString(),
+      deleteCell("run", run.name),
+    ]));
+  }
+  const ckptTable = document.getElementById("ckptTable");
+  ckptTable.replaceChildren(
+    headerOf(["file", "kind", "size", "modified", "", ""]));
+  for (const item of data.checkpoints) {
+    const infoCell = document.createElement("td");
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "Info";
+    infoBtn.addEventListener("click", () => showInfo(item.name));
+    infoCell.appendChild(infoBtn);
+    ckptTable.appendChild(rowOf([
+      item.name, item.kind, item.size_mb + " MB",
+      new Date(item.modified * 1000).toLocaleString(),
+      infoCell, deleteCell("checkpoint", item.name),
+    ]));
+  }
+}
+
+/* ---------- Tabs & boot ---------- */
+function switchTab(name) {
+  for (const pane of document.querySelectorAll(".tabpane")) {
+    pane.hidden = pane.id !== "tab-" + name;
+  }
+  for (const tab of document.querySelectorAll("nav .tab")) {
+    tab.classList.toggle("active", tab.dataset.tab === name);
+  }
+  if (name === "metrics") loadMetricsTab();
+  if (name === "storage") { loadStorageTab(); }
+}
+
+for (const tab of document.querySelectorAll("nav .tab")) {
+  tab.addEventListener("click", event => {
+    event.preventDefault();
+    switchTab(tab.dataset.tab);
+  });
 }
 
 async function boot() {

@@ -217,11 +217,17 @@ class TrainingManager:
             if not self._alive() or self._command is None:
                 return set()
             artifacts = {f"runs/{self._run_name}"}
-            for flag in ("--checkpoint", "--training-state"):
+            defaults = {
+                "--checkpoint": "checkpoints/latest.pt",
+                "--training-state": "checkpoints/training-state.pt",
+            }
+            for flag, default in defaults.items():
                 if flag in self._command:
                     artifacts.add(
                         self._command[self._command.index(flag) + 1]
                     )
+                else:
+                    artifacts.add(default)
             return artifacts
 
     def _alive(self) -> bool:

@@ -44,9 +44,33 @@ Only one training run is active at a time.
 The unchanged game page from [playing.md](playing.md), served by the
 same process at `/play`.
 
-## Metrics and Storage tabs
+## Metrics tab
 
-Planned as stage 2: in-console charts from `metrics.jsonl` with optional
-TensorBoard/plot integration, model information for each checkpoint
-(board, architecture, training options, iterations), and cleanup with
-type-the-name confirmation.
+Charts render directly in the console from each run's `metrics.jsonl` —
+no extra dependencies. Select any combination of runs to overlay; since
+resumed runs continue the iteration numbering, selecting a run together
+with its resumes draws one continuous trajectory. Charted series: total
+loss, policy KL, value loss, value calibration, both evaluation scores,
+and games per second (long runs are downsampled for display).
+
+The External tools card integrates the optional `metrics` extra when
+installed: start/stop a TensorBoard subprocess over `runs/` with a link
+to open it, and generate the static PNG charts for a run
+(`losses.png`, `throughput.png`, `evaluation.png`), displayed inline.
+Without the extra, both buttons explain what to install.
+
+## Storage tab
+
+Lists every run (iteration range, size, date) and every checkpoint file
+(model or resumable training state, size, date).
+
+"Info" on a model shows its basic information: board size and win
+length, network architecture (channels, blocks, parameter count),
+checkpoint format, total iterations trained, and — cross-referenced from
+every run whose configuration wrote that file — the exact training
+options used per run. Training states are summarized without loading
+their replay buffers.
+
+Deleting requires typing the exact run or file name to confirm, and
+anything the active training run is writing (its run directory,
+checkpoint, and training state) is refused outright.
