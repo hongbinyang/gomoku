@@ -103,8 +103,12 @@ python -m gomoku_muzero.train \
   --iterations 100 \
   --run-name baseline-10x10-resumed \
   --checkpoint checkpoints/baseline-10x10.pt \
-  --training-state checkpoints/baseline-10x10-state.pt
+  --training-state checkpoints/baseline-10x10-state.pt \
+  --tensorboard
 ```
+
+Remember `--tensorboard` on every resume — it is a per-invocation option,
+not part of the saved state.
 
 `--iterations` counts additional iterations; the saved board size and win
 length take precedence over command-line values. See

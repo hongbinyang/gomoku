@@ -117,12 +117,19 @@ buffer. Continue an interrupted run with:
 ```bash
 python -m gomoku_muzero.train \
   --resume checkpoints/training-state.pt \
-  --iterations 50
+  --iterations 50 \
+  --run-name my-run-resumed \
+  --tensorboard
 ```
 
 `--iterations` counts additional iterations on top of the saved counter. The
 board size, win length, and network architecture stored in the state take
-precedence over the command line. A resumed run starts a fresh metrics run
+precedence over the command line — but logging options do not carry over:
+pass `--tensorboard` again on every resume, or the resumed run writes only
+JSONL/CSV metrics and stays invisible to a TensorBoard dashboard. Because
+iteration numbering continues from the saved counter, enabling the original
+and resumed runs together in TensorBoard displays one continuous curve. A
+resumed run starts a fresh metrics run
 directory; RNG state is not restored, so resumed runs are not bit-identical
 to uninterrupted ones.
 
