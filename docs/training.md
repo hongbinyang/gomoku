@@ -21,32 +21,35 @@ With no options it uses a 10x10 board and writes
 | `--games-per-iteration N` | `2` | New self-play games per iteration |
 | `--training-steps N` | `10` | Optimizer updates per iteration |
 | `--batch-size N` | `32` | Replay samples per update |
-| `--unroll-steps N` | `5` | Recurrent dynamics steps per sample |
 | `--hidden-channels N` | `64` | Channels in the residual towers |
 | `--res-blocks N` | `4` | Representation tower depth; dynamics uses half |
 | `--learning-rate X` | `0.001` | Adam learning rate |
 | `--value-loss-weight X` | `1.0` | Relative weight of the value objective |
 | `--temperature-moves N` | `8` | Opening moves sampled at temperature 1 |
-| `--dirichlet-alpha X` | `0.3` | Root noise concentration (about 10/branching) |
 | `--replay-capacity N` | `500` | Maximum games retained |
 | `--replay-sampling MODE` | `uniform` | Baseline `uniform` or recency-weighted `recent` |
-| `--replay-half-life N` | `100` | Recency half-life measured in games |
 | `--no-augment` | disabled | Disable dihedral symmetry augmentation |
 | `--evaluation-interval N` | `5` | Iterations between evaluations |
-| `--evaluation-games N` | `20` | Games against random per evaluation |
+| `--evaluation-games N` | `20` | Games per evaluation, against each baseline |
 | `--seed N` | `0` | NumPy, PyTorch, MCTS, and replay seed |
 | `--checkpoint PATH` | `checkpoints/latest.pt` | Latest model output path |
 | `--training-state PATH` | `checkpoints/training-state.pt` | Resumable training state output path |
 | `--resume PATH` | | Continue from a saved training state |
 | `--device NAME` | `auto` | `auto`, `cpu`, `cuda`, `mps`, or `tpu` |
 | `--self-play-mode MODE` | `async` | `async` actor-learner overlap or sequential `sync` |
-| `--self-play-queue-size N` | `4` | Completed games buffered between actor and learner |
 | `--run-name NAME` | UTC timestamp | Metrics run directory name |
-| `--runs-dir PATH` | `runs` | Parent directory for run metrics |
 | `--tensorboard` | disabled | Emit optional TensorBoard events |
 | `-h`, `--help` | | Print help and exit |
 
 `win-length` must be between 1 and `board-size`.
+
+A few values are deliberately not exposed. Root Dirichlet noise follows
+the paper's 10/branching-factor rule and is derived from the board size
+(0.1 on 10x10; the derived value is recorded in each run's
+`config.json`). The unroll length is fixed at the paper's K = 5, which
+the 1/K loss weighting assumes. Recency sampling uses a fixed half-life
+of 200 games, the actor queue holds 4 games, and metrics always live
+under `runs/`.
 
 ## Self-play execution
 
@@ -87,14 +90,12 @@ alternative:
 weight(age) = 0.5 ** (age / half_life)
 ```
 
-The newest game has age zero. With a half-life of 100, a game that is 100
-insertions older has half the sampling weight while remaining available to
-reduce forgetting.
+The newest game has age zero and the half-life is fixed at 200 games: a
+game that is 200 insertions older has half the sampling weight while
+remaining available to reduce forgetting.
 
 ```bash
-python -m gomoku_muzero.train \
-  --replay-sampling recent \
-  --replay-half-life 100
+python -m gomoku_muzero.train --replay-sampling recent
 ```
 
 Every sampled position is additionally transformed by one of the board's
@@ -249,16 +250,13 @@ python -m gomoku_muzero.train \
   --games-per-iteration 10 \
   --training-steps 50 \
   --batch-size 64 \
-  --unroll-steps 5 \
   --learning-rate 0.0003 \
   --value-loss-weight 2.0 \
   --temperature-moves 16 \
-  --dirichlet-alpha 0.15 \
   --replay-capacity 2000 \
   --replay-sampling recent \
-  --replay-half-life 200 \
   --evaluation-interval 10 \
-  --evaluation-games 50 \
+  --evaluation-games 25 \
   --run-name baseline-10x10 \
   --checkpoint checkpoints/baseline-10x10.pt \
   --training-state checkpoints/baseline-10x10-state.pt \
@@ -269,16 +267,14 @@ This configuration generates 5,000 self-play games and performs 25,000
 optimizer updates. It is a starting point rather than a guarantee of playing
 strength.
 
-The three exploration and objective settings address the slowest-learning
+The two exploration and objective settings address the slowest-learning
 signal, the value function. `--temperature-moves 16` keeps openings diverse
 for longer so game outcomes carry learnable signal instead of repeating one
-line; `--dirichlet-alpha 0.15` matches the paper's 10/branching heuristic
-for a roughly 100-move action space; `--value-loss-weight 2.0` biases
-optimization toward the value head once outcomes become predictable. Watch
-`value_calibration_mae`: it falling below roughly `0.9` marks the point
-where search values become trustworthy; if it stays near `1.0` for
-thousands of games, extend `--temperature-moves` rather than adding
-iterations.
+line; `--value-loss-weight 2.0` biases optimization toward the value head
+once outcomes become predictable. Watch `value_calibration_mae`: it falling
+below roughly `0.9` marks the point where search values become trustworthy;
+if it stays near `1.0` for thousands of games, extend
+`--temperature-moves` rather than adding iterations.
 
 When allocating additional computation, prioritize:
 

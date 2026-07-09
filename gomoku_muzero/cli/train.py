@@ -73,12 +73,6 @@ def main() -> None:
         help="replay samples per optimizer update (default: 32)",
     )
     parser.add_argument(
-        "--unroll-steps",
-        type=int,
-        default=5,
-        help="recurrent dynamics steps per sample (default: 5)",
-    )
-    parser.add_argument(
         "--hidden-channels",
         type=int,
         default=64,
@@ -115,15 +109,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--dirichlet-alpha",
-        type=float,
-        default=0.3,
-        help=(
-            "root Dirichlet noise concentration; the paper scales this "
-            "roughly as 10/branching-factor (default: 0.3)"
-        ),
-    )
-    parser.add_argument(
         "--replay-capacity",
         type=int,
         default=500,
@@ -139,12 +124,6 @@ def main() -> None:
         "--no-augment",
         action="store_true",
         help="disable dihedral symmetry augmentation of replay samples",
-    )
-    parser.add_argument(
-        "--replay-half-life",
-        type=float,
-        default=100.0,
-        help="recency sampling half-life in games (default: 100)",
     )
     parser.add_argument(
         "--evaluation-interval",
@@ -196,20 +175,9 @@ def main() -> None:
         help="overlap self-play with training or run sequentially (default: async)",
     )
     parser.add_argument(
-        "--self-play-queue-size",
-        type=int,
-        default=4,
-        help="maximum completed games waiting for learner (default: 4)",
-    )
-    parser.add_argument(
         "--run-name",
         default=None,
         help="metrics run name (default: UTC timestamp)",
-    )
-    parser.add_argument(
-        "--runs-dir",
-        default="runs",
-        help="root directory for metrics runs (default: runs)",
     )
     parser.add_argument(
         "--tensorboard",
@@ -258,11 +226,15 @@ def main() -> None:
             hidden_channels=args.hidden_channels,
             num_blocks=args.res_blocks,
         ).to(device.torch_device)
+    # The paper scales root Dirichlet noise as roughly 10/branching-factor
+    # (chess 0.3, Go 0.03); derive it from the board instead of exposing a
+    # knob that silently goes stale when the board size changes.
+    dirichlet_alpha = 10.0 / env.action_space_size
     mcts = MCTS(
         network,
         MCTSConfig(
             num_simulations=args.simulations,
-            dirichlet_alpha=args.dirichlet_alpha,
+            dirichlet_alpha=dirichlet_alpha,
         ),
         seed=args.seed,
     )
@@ -271,7 +243,7 @@ def main() -> None:
         action_space_size=env.action_space_size,
         seed=args.seed,
         sampling=args.replay_sampling,
-        recency_half_life=args.replay_half_life,
+        recency_half_life=200.0,
         augment_symmetries=not args.no_augment,
     )
     trainer = MuZeroTrainer(
@@ -294,10 +266,7 @@ def main() -> None:
     )
     pipeline_kwargs = {}
     if args.self_play_mode == "async":
-        pipeline_kwargs = {
-            "self_play_queue_size": args.self_play_queue_size,
-            "actor_seed": args.seed + 10_000,
-        }
+        pipeline_kwargs = {"actor_seed": args.seed + 10_000}
     pipeline = pipeline_class(
         env,
         mcts,
@@ -307,7 +276,7 @@ def main() -> None:
             games_per_iteration=args.games_per_iteration,
             training_steps_per_iteration=args.training_steps,
             batch_size=args.batch_size,
-            num_unroll_steps=args.unroll_steps,
+            num_unroll_steps=5,
             evaluation_interval=args.evaluation_interval,
             evaluation_games=args.evaluation_games,
         ),
@@ -315,13 +284,14 @@ def main() -> None:
         **pipeline_kwargs,
     )
     logger = RunLogger(
-        runs_dir=args.runs_dir,
+        runs_dir="runs",
         run_name=args.run_name,
         tensorboard=args.tensorboard,
     )
     logger.write_config(
         {
             **vars(args),
+            "dirichlet_alpha": dirichlet_alpha,
             "resolved_device": device.description,
             "python_version": platform.python_version(),
             "pytorch_version": torch.__version__,

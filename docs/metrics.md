@@ -20,8 +20,9 @@ Git by default.
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `--run-name NAME` | UTC timestamp | Stable directory name for the run |
-| `--runs-dir PATH` | `runs` | Parent directory for run data |
 | `--tensorboard` | disabled | Also emit TensorBoard event files |
+
+Run data always lives under `runs/` in the working directory.
 
 Run names may contain letters, numbers, periods, underscores, and hyphens.
 Existing run directories are never overwritten.
@@ -29,13 +30,12 @@ Existing run directories are never overwritten.
 Example:
 
 ```bash
-python -m gomoku_muzero.train \
-  --run-name baseline-10x10 \
-  --runs-dir runs
+python -m gomoku_muzero.train --run-name baseline-10x10
 ```
 
-The configuration records every CLI argument, resolved device, Python
-version, and PyTorch version.
+The configuration records every CLI argument, derived values such as the
+Dirichlet noise concentration, the resolved device, Python version, and
+PyTorch version.
 
 ## Collected metrics
 
