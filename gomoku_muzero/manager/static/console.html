@@ -289,6 +289,8 @@ function fieldFor(entry) {
       option.textContent = name;
       input.appendChild(option);
     }
+    input.addEventListener("change",
+      () => applyResumeConfig(input.value));
   } else if (entry.choices) {
     input = document.createElement("select");
     for (const choice of entry.choices) {
@@ -357,6 +359,55 @@ function say(text, cls) {
   const message = document.getElementById("message");
   message.textContent = text;
   message.className = cls || "";
+}
+
+function resetFormDefaults() {
+  for (const entry of schema) {
+    const input = document.getElementById(entry.name);
+    if (!input || entry.name === "resume") continue;
+    if (entry.kind === "flag") {
+      input.checked = entry.name === "tensorboard";
+    } else if (entry.name === "run_name") {
+      input.value = "";
+    } else if (entry.default !== null && entry.default !== undefined) {
+      input.value = entry.default;
+    } else {
+      input.value = "";
+    }
+  }
+}
+
+async function applyResumeConfig(statePath) {
+  if (!statePath) {
+    resetFormDefaults();
+    say("Fresh run: form reset to defaults.");
+    return;
+  }
+  const stateName = statePath.split("/").pop();
+  try {
+    const data = await api(
+      "/manager/api/resume-config?state="
+      + encodeURIComponent(stateName));
+    if (!data.found) {
+      say("No run recorded for this state file — review every option "
+          + "manually before starting.", "error");
+      return;
+    }
+    let applied = 0;
+    for (const [name, value] of Object.entries(data.options)) {
+      const input = document.getElementById(name);
+      const entry = schema.find(e => e.name === name);
+      if (!input || !entry) continue;
+      if (entry.kind === "flag") input.checked = Boolean(value);
+      else input.value = value;
+      applied++;
+    }
+    say(`Prefilled ${applied} options from run "${data.source_run}". `
+        + "Set --iterations (additional) and consider a new seed; "
+        + "run name is left blank for a fresh directory.", "ok");
+  } catch (error) {
+    say("Error: " + error.message, "error");
+  }
 }
 
 async function startRun(event) {

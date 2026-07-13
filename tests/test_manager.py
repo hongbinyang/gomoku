@@ -8,7 +8,11 @@ import pytest
 import torch
 
 from gomoku_muzero.manager.server import ManagerServer, list_training_states
-from gomoku_muzero.manager.training import TrainingManager, training_options
+from gomoku_muzero.manager.training import (
+    TrainingManager,
+    resume_config,
+    training_options,
+)
 from gomoku_muzero.model.checkpoint import save_checkpoint
 from gomoku_muzero.model.networks import MuZeroNetwork
 
@@ -97,6 +101,52 @@ def test_training_lifecycle_end_to_end(tmp_path, monkeypatch) -> None:
     assert status["log_tail"]
     assert (tmp_path / "runs" / "console-smoke" / "metrics.jsonl").exists()
     assert manager.active_run_artifacts() == set()
+
+
+def test_resume_config_recovers_latest_matching_run(tmp_path) -> None:
+    for index, (run, sims) in enumerate(
+        [("go19-v1", 120), ("go19-v1-r2", 150)]
+    ):
+        run_dir = tmp_path / "runs" / run
+        run_dir.mkdir(parents=True)
+        (run_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "run_name": run,
+                    "iterations": 20,
+                    "resume": None if index == 0 else "state",
+                    "simulations": sims,
+                    "learning_rate": 0.0003,
+                    "value_loss_weight": 2.0,
+                    "tensorboard": True,
+                    "training_state": "checkpoints/go19-v1-state.pt",
+                    "checkpoint": "checkpoints/go19-v1.pt",
+                }
+            )
+        )
+        metrics = run_dir / "metrics.jsonl"
+        metrics.write_text('{"step": 1}\n')
+        # Make the second run unambiguously newer.
+        import os
+        os.utime(metrics, (1000 + index, 1000 + index))
+
+    result = resume_config("go19-v1-state.pt", tmp_path)
+
+    assert result["found"]
+    assert result["source_run"] == "go19-v1-r2"  # the newest match
+    options = result["options"]
+    assert options["simulations"] == 150
+    assert options["value_loss_weight"] == 2.0
+    assert options["training_state"] == "checkpoints/go19-v1-state.pt"
+    # Never prefilled: a resumed run needs fresh values for these.
+    for excluded in ("run_name", "resume", "iterations"):
+        assert excluded not in options
+
+    assert resume_config("unknown-state.pt", tmp_path) == {
+        "found": False
+    }
+    with pytest.raises(ValueError, match="invalid"):
+        resume_config("../escape.pt", tmp_path)
 
 
 def test_list_training_states(tmp_path) -> None:

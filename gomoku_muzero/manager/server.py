@@ -21,7 +21,11 @@ from gomoku_muzero.manager.storage import (
     model_info,
 )
 from gomoku_muzero.manager.tools import TensorBoardManager, generate_plots
-from gomoku_muzero.manager.training import TrainingManager, training_options
+from gomoku_muzero.manager.training import (
+    TrainingManager,
+    resume_config,
+    training_options,
+)
 from gomoku_muzero.web.server import GomokuWebServer, _Handler
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -69,6 +73,13 @@ class _ManagerHandler(_Handler):
                         self.server.checkpoint_dir
                     )
                 },
+            )
+        elif path == "/manager/api/resume-config":
+            self._send_json(
+                200,
+                resume_config(
+                    params.get("state", ""), self.server.workdir
+                ),
             )
         elif path == "/manager/api/runs":
             self._send_json(

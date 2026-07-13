@@ -69,6 +69,57 @@ def default_run_name() -> str:
     return datetime.now(timezone.utc).strftime("run-%Y%m%d-%H%M%S")
 
 
+def resume_config(
+    state_name: str, workdir: str | Path = "."
+) -> dict[str, Any]:
+    """Recover the options of the run that last wrote a training state.
+
+    Resuming restores the model, optimizer, replay buffer, board, and
+    network from the state file — but runtime options (simulations,
+    learning rate, evaluation cadence, output paths, ...) come from the
+    command line. This looks up the most recent run whose configuration
+    wrote ``state_name`` so the console can prefill the form instead of
+    silently reverting to defaults.
+    """
+    if "/" in state_name or "\\" in state_name or state_name.startswith("."):
+        raise ValueError("invalid state name")
+    known = {entry["name"] for entry in training_options()}
+    excluded = {"run_name", "resume", "iterations"}
+    best: tuple[str, dict[str, Any]] | None = None
+    best_mtime = -1.0
+    runs_dir = Path(workdir) / "runs"
+    if runs_dir.is_dir():
+        for config_path in runs_dir.glob("*/config.json"):
+            try:
+                config = json.loads(config_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            written = str(config.get("training_state", ""))
+            if Path(written).name != state_name:
+                continue
+            metrics_path = config_path.parent / "metrics.jsonl"
+            mtime = (
+                metrics_path.stat().st_mtime
+                if metrics_path.exists()
+                else config_path.stat().st_mtime
+            )
+            if mtime > best_mtime:
+                best = (config_path.parent.name, config)
+                best_mtime = mtime
+    if best is None:
+        return {"found": False}
+    run_name, config = best
+    return {
+        "found": True,
+        "source_run": run_name,
+        "options": {
+            key: config[key]
+            for key in sorted(known - excluded)
+            if key in config and config[key] is not None
+        },
+    }
+
+
 class TrainingManager:
     """Own at most one training subprocess and report its progress."""
 
