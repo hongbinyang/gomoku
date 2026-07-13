@@ -87,8 +87,10 @@ Higher simulation counts generally improve search but make each response
 slower. Keep `--simulations` at 100 or above: the search's known-rules
 threat refutations (blocking open threes and fours) need roughly that
 budget to complete; below it the model may revert to threat-blind play.
-Play uses greedy root selection without Dirichlet noise, so identical
-weights and positions are deterministic.
+For 19x19 models use 400 or more — the branching factor is 3.6x larger,
+and search compensates for a policy that is still maturing at that
+scale. Play uses greedy root selection without Dirichlet noise, so
+identical weights and positions are deterministic.
 
 ## Examples
 

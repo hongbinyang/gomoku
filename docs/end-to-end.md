@@ -92,7 +92,8 @@ python -m gomoku_muzero.train \
 ```
 
 See [training.md](training.md) for what the exploration and value-weight
-settings do and which metric confirms they are working.
+settings do and which metric confirms they are working, and its
+"19x19 configuration" section for the full Go-sized board.
 
 Run names cannot overwrite existing run directories. Choose a new name when
 repeating an experiment, such as `baseline-10x10-seed1`.

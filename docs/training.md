@@ -276,6 +276,74 @@ below roughly `0.9` marks the point where search values become trustworthy;
 if it stays near `1.0` for thousands of games, extend
 `--temperature-moves` rather than adding iterations.
 
+## 19x19 configuration
+
+The full Go-sized board is a serious jump: 361 cells instead of 100
+(about 3.6x compute per network inference), games that start around
+170+ moves while the policy is diffuse, and a much larger action space
+to learn. The recommended starting configuration:
+
+```bash
+python -m gomoku_muzero.train \
+  --board-size 19 \
+  --win-length 5 \
+  --iterations 300 \
+  --simulations 120 \
+  --games-per-iteration 8 \
+  --training-steps 50 \
+  --batch-size 64 \
+  --hidden-channels 96 \
+  --res-blocks 6 \
+  --learning-rate 0.0003 \
+  --value-loss-weight 2.0 \
+  --temperature-moves 30 \
+  --replay-capacity 1500 \
+  --replay-sampling recent \
+  --evaluation-interval 25 \
+  --evaluation-games 10 \
+  --device mps \
+  --run-name go19-v1 \
+  --checkpoint checkpoints/go19-v1.pt \
+  --training-state checkpoints/go19-v1-state.pt \
+  --tensorboard \
+  --seed 0
+```
+
+What changes versus 10x10, and why:
+
+- `--res-blocks 6` and `--hidden-channels 96`: four blocks have a
+  receptive field of roughly 19 cells, so an edge stone would be
+  invisible from the far side; six blocks (about 1.6M parameters) is
+  the minimum for whole-board judgment.
+- `--temperature-moves 30`: games are 2-3x longer, so exploration must
+  cover proportionally more of the opening (this matches the paper's
+  Go/chess setting).
+- `--simulations 120`: a compromise — 361-way branching wants more,
+  but time is linear in simulations and the known-rules search layer
+  carries the tactics.
+- `--evaluation-interval 25` and `--evaluation-games 10`: evaluation
+  games take minutes each at this size; both baselines saturate early
+  regardless.
+- `--replay-capacity 1500`: keeps the training-state file (which
+  contains the replay buffer and is rewritten every iteration) around
+  half a gigabyte.
+- Root Dirichlet noise derives automatically to 10/361 ~ 0.028,
+  essentially the paper's 0.03 for Go.
+
+Expectations, from a real run on an Apple M3: about 7 minutes per
+iteration initially (~50 s per game at 178 average moves), speeding up
+as the policy sharpens and games shorten (down to ~90 moves by
+~500 iterations). Learning takes correspondingly longer than 10x10:
+after ~4,000 games the policy is clearly structured (policy CE well
+below the ln(361) ~ 5.9 uniform ceiling) but opening play and fork
+prevention are still forming — scale-adjusted, several times the 10x10
+game count is a reasonable budget, so plan on long runs driven by
+`--resume` (or the management console, which prefills a resumed run's
+options). Expect early self-play games to be very long: with a
+near-uniform policy both sides block every four, so games sprawl;
+`moves_generated` falling over training is the signal of purposeful
+play emerging.
+
 When allocating additional computation, prioritize:
 
 1. `games-per-iteration` for more diverse experience;
