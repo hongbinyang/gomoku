@@ -13,6 +13,12 @@ from gomoku_muzero.runtime.device import optimizer_step
 from gomoku_muzero.training.replay import ReplayBatch
 
 
+# Updates are clipped to this global norm. Chosen from observed healthy
+# training (norms of 1-8); the logged grad_norm metric reports the
+# pre-clip value, so growth beyond this bound stays visible.
+MAX_GRAD_NORM = 10.0
+
+
 @dataclass(frozen=True)
 class LossWeights:
     """Relative weights of MuZero's three supervised objectives."""
@@ -215,7 +221,7 @@ class MuZeroTrainer:
         losses = self.compute_loss(batch)
         losses.total.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.network.parameters(), max_norm=float("inf")
+            self.network.parameters(), max_norm=MAX_GRAD_NORM
         )
         device = next(self.network.parameters()).device
         optimizer_step(self.optimizer, device)

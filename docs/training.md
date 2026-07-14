@@ -208,7 +208,9 @@ iteration=5 games=2 loss=3.104 policy=2.410 entropy=1.900 kl=0.510 value=0.520 r
 Persisted metrics additionally include `policy_ce` (unweighted
 cross-entropy over searched positions, satisfying
 `policy_ce = entropy + kl`), `grad_norm` (global gradient norm before each
-optimizer step), and `value_calibration_mae` (mean absolute error between
+optimizer step; updates are clipped to a maximum norm of 10, with the
+metric reporting the pre-clip value), and `value_calibration_mae` (mean
+absolute error between
 MCTS root values and final game outcomes for the iteration's new self-play
 games — the single best indicator of whether search value estimates are
 becoming trustworthy).

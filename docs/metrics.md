@@ -46,7 +46,9 @@ Training objectives:
 - unweighted policy cross-entropy over searched positions (`policy_ce`);
 - target policy entropy;
 - policy KL divergence;
-- global gradient norm before each optimizer step (`grad_norm`).
+- global gradient norm before each optimizer step (`grad_norm`);
+  updates are clipped to a maximum norm of 10, and the metric reports
+  the pre-clip value so growth beyond the bound stays visible.
 
 Throughput and timing:
 

@@ -122,6 +122,29 @@ def test_absorbing_padding_is_supervised_toward_zero() -> None:
     assert changed_loss.item() != pytest.approx(original_loss.item())
 
 
+def test_gradients_are_clipped_to_the_max_norm() -> None:
+    from gomoku_muzero.training.trainer import MAX_GRAD_NORM
+
+    network = MuZeroNetwork(board_size=2, hidden_channels=8)
+    trainer = MuZeroTrainer(network)
+    losses = trainer.compute_loss(make_batch())
+    (losses.total * 1_000).backward()  # inflate gradients artificially
+
+    reported = torch.nn.utils.clip_grad_norm_(
+        network.parameters(), MAX_GRAD_NORM
+    )
+    clipped = torch.sqrt(
+        sum(
+            parameter.grad.norm() ** 2
+            for parameter in network.parameters()
+            if parameter.grad is not None
+        )
+    )
+
+    assert reported > MAX_GRAD_NORM  # pre-clip norm stays observable
+    assert clipped <= MAX_GRAD_NORM * 1.01
+
+
 def test_zero_step_unroll_has_no_reward_loss() -> None:
     trainer = MuZeroTrainer(MuZeroNetwork(board_size=2, hidden_channels=8))
 
