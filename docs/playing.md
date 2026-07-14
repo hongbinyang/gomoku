@@ -55,7 +55,7 @@ Moves as (row, column), zero-based from the top-left:
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `--host ADDR` | `127.0.0.1` | Bind address; local-only by default |
-| `--port N` | `8000` | Port to listen on |
+| `--port N` | `8001` | Port to listen on (8000 belongs to the console) |
 | `--checkpoint-dir PATH` | `checkpoints` | Directory scanned for models |
 | `--device NAME` | `auto` | `auto`, `cpu`, `cuda`, `mps`, or `tpu` |
 

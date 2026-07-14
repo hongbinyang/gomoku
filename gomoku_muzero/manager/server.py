@@ -49,6 +49,10 @@ class _ManagerHandler(_Handler):
             self._route_get()
         except (ValueError, FileNotFoundError) as error:
             self._send_json(400, {"error": str(error)})
+        except Exception as error:  # noqa: BLE001 — never sever the connection
+            self._send_json(
+                500, {"error": f"{type(error).__name__}: {error}"}
+            )
 
     def _route_get(self) -> None:
         path, _, query = self.path.partition("?")
@@ -197,6 +201,10 @@ class _ManagerHandler(_Handler):
             self._send_json(404, {"error": str(error)})
         except (ValueError, KeyError, TypeError) as error:
             self._send_json(400, {"error": str(error) or "bad request"})
+        except Exception as error:  # noqa: BLE001 — never sever the connection
+            self._send_json(
+                500, {"error": f"{type(error).__name__}: {error}"}
+            )
 
     def _send_console(self) -> None:
         body = (_STATIC_DIR / "console.html").read_bytes()

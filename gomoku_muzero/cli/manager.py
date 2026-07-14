@@ -36,12 +36,18 @@ def main() -> None:
 
     device = resolve_device(args.device)
     print(f"device={device.description}")
-    serve(
-        host=args.host,
-        port=args.port,
-        checkpoint_dir=args.checkpoint_dir,
-        device=device.torch_device,
-    )
+    try:
+        serve(
+            host=args.host,
+            port=args.port,
+            checkpoint_dir=args.checkpoint_dir,
+            device=device.torch_device,
+        )
+    except OSError as error:
+        raise SystemExit(
+            f"cannot listen on {args.host}:{args.port} ({error}); "
+            "is another server running? Choose a different --port."
+        ) from error
 
 
 if __name__ == "__main__":

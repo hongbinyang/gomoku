@@ -49,23 +49,60 @@ class TensorBoardManager:
                 )
             if self._process is not None and self._process.poll() is None:
                 return self.status()
-            self._process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "tensorboard.main",
-                    "--logdir",
-                    str(self.workdir / "runs"),
-                    "--port",
-                    str(self.port),
-                    "--host",
-                    "127.0.0.1",
-                ],
-                cwd=self.workdir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-            )
+            import socket
+
+            with socket.socket() as probe:
+                probe.settimeout(0.3)
+                if probe.connect_ex(("127.0.0.1", self.port)) == 0:
+                    raise ValueError(
+                        f"port {self.port} is already in use — likely a "
+                        "TensorBoard started manually. Stop that one, or "
+                        f"open http://127.0.0.1:{self.port} directly."
+                    )
+            log_dir = self.workdir / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / "tensorboard.log"
+            with log_path.open("wb") as log_file:
+                self._process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "tensorboard.main",
+                        "--logdir",
+                        str(self.workdir / "runs"),
+                        "--port",
+                        str(self.port),
+                        "--host",
+                        "127.0.0.1",
+                    ],
+                    cwd=self.workdir,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                )
+            # TensorBoard that fails at startup dies within a few
+            # seconds; surface that instead of silently showing
+            # "stopped" again. Return as soon as it starts serving.
+            import time
+
+            deadline = time.time() + 8.0
+            while time.time() < deadline:
+                if self._process.poll() is not None:
+                    tail = ""
+                    try:
+                        tail = log_path.read_text(errors="replace")[-400:]
+                    except OSError:
+                        pass
+                    raise ValueError(
+                        "TensorBoard exited immediately (is another "
+                        f"TensorBoard already using port {self.port}?). "
+                        f"Log tail: {tail.strip()}"
+                    )
+                with socket.socket() as probe:
+                    probe.settimeout(0.2)
+                    if probe.connect_ex(("127.0.0.1", self.port)) == 0:
+                        break
+                time.sleep(0.25)
         return self.status()
 
     def stop(self) -> dict[str, Any]:
@@ -88,6 +125,13 @@ def generate_plots(workdir: str | Path, run_name: str) -> list[str]:
         )
     if "/" in run_name or "\\" in run_name or run_name.startswith("."):
         raise ValueError("invalid run name")
+    # Force the headless backend before pyplot is imported: this runs in
+    # a server worker thread, and GUI backends (macOS in particular)
+    # crash the whole process outside the main thread. We only write
+    # PNG files, so Agg is always sufficient.
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
     from gomoku_muzero.cli.plot import create_plots
 
     run_dir = Path(workdir) / "runs" / run_name

@@ -67,6 +67,21 @@ to open it, and generate the static PNG charts for a run
 (`losses.png`, `throughput.png`, `evaluation.png`), displayed inline.
 Without the extra, both buttons explain what to install.
 
+TensorBoard runs on port 6006 and logs to `logs/tensorboard.log`; if
+that port is already taken (typically by a TensorBoard you started
+manually), the console says so rather than silently failing — stop the
+manual one or open it directly. Plot generation always uses the
+headless Matplotlib backend, so it is safe from the server's worker
+threads.
+
+## Ports
+
+Each service has its own default so they can run side by side: the
+console on 8000, the standalone play server
+(`python -m gomoku_muzero.serve`) on 8001, and TensorBoard on 6006.
+Every server prints a clear message and exits if its port is taken;
+use `--port` to relocate.
+
 ## Storage tab
 
 Lists every run (iteration range, size, date) and every checkpoint file

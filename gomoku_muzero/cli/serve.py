@@ -18,8 +18,11 @@ def main() -> None:
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
-        help="port to listen on (default: 8000)",
+        default=8001,
+        help=(
+            "port to listen on (default: 8001, leaving 8000 to the "
+            "management console)"
+        ),
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -36,12 +39,18 @@ def main() -> None:
 
     device = resolve_device(args.device)
     print(f"device={device.description}")
-    serve(
-        host=args.host,
-        port=args.port,
-        checkpoint_dir=args.checkpoint_dir,
-        device=device.torch_device,
-    )
+    try:
+        serve(
+            host=args.host,
+            port=args.port,
+            checkpoint_dir=args.checkpoint_dir,
+            device=device.torch_device,
+        )
+    except OSError as error:
+        raise SystemExit(
+            f"cannot listen on {args.host}:{args.port} ({error}); "
+            "is another server running? Choose a different --port."
+        ) from error
 
 
 if __name__ == "__main__":

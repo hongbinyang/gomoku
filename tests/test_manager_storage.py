@@ -38,9 +38,12 @@ def workspace(tmp_path):
         )
     )
     rows = [
-        {"step": 1, "loss": 5.0, "value_calibration_mae": 1.0},
-        {"step": 2, "loss": 4.0, "evaluation_score": 0.5},
-        {"step": 3, "loss": 3.0, "policy_kl": 1.5},
+        {"event": "iteration", "step": 1, "loss": 5.0,
+         "value_calibration_mae": 1.0},
+        {"event": "iteration", "step": 2, "loss": 4.0,
+         "evaluation_score": 0.5},
+        {"event": "iteration", "step": 3, "loss": 3.0,
+         "policy_kl": 1.5},
     ]
     (run_dir / "metrics.jsonl").write_text(
         "\n".join(json.dumps(row) for row in rows) + "\n"
@@ -119,6 +122,49 @@ def test_delete_refuses_active_artifacts_and_escapes(workspace) -> None:
             "checkpoint", "../evil.pt", "../evil.pt", workspace,
             workspace / "checkpoints", set(),
         )
+
+
+def test_generate_plots_works_from_a_worker_thread(workspace) -> None:
+    """Regression: GUI matplotlib backends crash off the main thread."""
+    pytest.importorskip("matplotlib")
+    import threading
+
+    from gomoku_muzero.manager.tools import generate_plots
+
+    results: dict = {}
+
+    def worker():
+        try:
+            results["files"] = generate_plots(workspace, "demo")
+        except Exception as error:  # noqa: BLE001
+            results["error"] = error
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=60)
+
+    assert "error" not in results, results.get("error")
+    assert "losses.png" in results["files"]
+    plots = workspace / "runs" / "demo" / "plots"
+    assert (plots / "losses.png").stat().st_size > 0
+
+
+def test_tensorboard_refuses_occupied_port(tmp_path) -> None:
+    import socket
+
+    from gomoku_muzero.manager.tools import TensorBoardManager
+
+    pytest.importorskip("tensorboard")
+    blocker = socket.socket()
+    blocker.bind(("127.0.0.1", 0))
+    blocker.listen(1)
+    port = blocker.getsockname()[1]
+    try:
+        manager = TensorBoardManager(tmp_path, port=port)
+        with pytest.raises(ValueError, match="already in use"):
+            manager.start()
+    finally:
+        blocker.close()
 
 
 def test_metric_series_and_run_listing(workspace) -> None:
