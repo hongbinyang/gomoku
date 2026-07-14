@@ -73,6 +73,8 @@ Enter moves as zero-based coordinates such as `2 3`. Enter `q` to stop.
   metrics, and convergence guidance.
 - [Management console](docs/manager.md): browser-based training
   lifecycle, progress, and play.
+- [Delivering a model](docs/delivery.md): package a trained model as a
+  small standalone bundle others can `pip install` and play.
 - [Playing](docs/playing.md): checkpoints, play options, and move input.
 - [MuZero walkthrough](docs/muzero-walkthrough.md): environment through the
   complete self-play and training loop.
